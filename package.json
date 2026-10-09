@@ -1,0 +1,16 @@
+{
+  "name": "cloudflare-preview",
+  "private": true,
+  "description": "GitHub Actions: Cloudflare Worker preview uploads, sticky PR comments, GitHub Deployments, production deploys.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "lint": "actionlint .github/workflows/*.yml examples/*.yml && shellcheck scripts/*.sh",
+    "verify": "bash scripts/verify.sh",
+    "reference": "node scripts/reference.mjs --write"
+  }
+}
