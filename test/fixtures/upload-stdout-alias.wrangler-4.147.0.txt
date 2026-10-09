@@ -1,0 +1,20 @@
+
+ ⛅️ wrangler 4.147.0
+────────────────────
+🌀 Building list of assets...
+✨ Read 117 files from the assets directory /home/runner/work/example/example/dist
+🌀 Starting asset upload...
+No updated asset files to upload. Proceeding with deployment...
+Total Upload: 0.40 KiB / gzip: 0.28 KiB
+Worker Startup Time: 0 ms
+Uploaded example-worker (1.73 sec)
+Worker Version ID: 5f3c1a2b-7d4e-4f60-9a81-2b3c4d5e6f70
+Version Preview URL: https://5f3c1a2b-example-worker.example.workers.dev
+Version Preview Alias URL: https://pr-42-example-worker.example.workers.dev
+
+To deploy this version to production traffic use the command wrangler versions deploy
+
+Changes to non-versioned settings (config properties 'logpush' or 'tail_consumers') take effect after your next deployment using the command wrangler versions deploy
+
+Changes to triggers (routes, custom domains, cron schedules, etc) must be applied with the command wrangler triggers deploy
+

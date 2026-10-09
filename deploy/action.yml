@@ -1,0 +1,170 @@
+name: Cloudflare preview / deploy
+description: >-
+  Deploy a Cloudflare Worker to production with `wrangler deploy`, with retries.
+  Checks the credentials first and skips with a warning (or fails) when they are
+  missing. Optionally records a GitHub Deployment for the production environment.
+author: Wave RF
+
+# Permissions: none from GitHub, unless github-deployment is true → deployments: write.
+
+inputs:
+  cloudflare-api-token:
+    description: Cloudflare API token (pass a secret).
+    required: false
+    default: ""
+  cloudflare-account-id:
+    description: Cloudflare account id.
+    required: false
+    default: ""
+  missing-secrets:
+    description: "`skip` (warn, outcome=skipped) or `fail` when the token or account id is empty. On a default-branch deploy `fail` is usually what you want. `ignore` skips the check, for a wrangler-command that injects its own credentials (a secrets-manager wrapper)."
+    required: false
+    default: skip
+  working-directory:
+    description: Directory wrangler runs in.
+    required: false
+    default: "."
+  wrangler-command:
+    description: >-
+      How to invoke wrangler. Empty → the repo's own install, found from the nearest lockfile at or above
+      working-directory: pnpm-lock.yaml → `pnpm exec wrangler`, yarn.lock → `yarn wrangler`,
+      bun.lock(b) → `bunx --no-install wrangler`, package-lock.json or none → node_modules/.bin/wrangler.
+      None of these downloads anything. Set it to override, e.g. a wrapper that injects secrets
+      (`./scripts/with-secrets.sh pnpm exec wrangler`). Split like a shell would, never run through one.
+    required: false
+    default: ""
+  wrangler-config:
+    description: Path to the wrangler config, relative to working-directory.
+    required: false
+    default: ""
+  wrangler-args:
+    description: Extra arguments for `wrangler deploy`.
+    required: false
+    default: ""
+  tag:
+    description: --tag pattern ({sha} {sha7} {branch} {label} {run}). Empty → omitted.
+    required: false
+    default: ""
+  message:
+    description: --message pattern. Empty → omitted.
+    required: false
+    default: "Deploy {sha7}"
+  url:
+    description: The public URL to report. Empty → derived from the deploy's triggers (custom domain, then route, then workers.dev).
+    required: false
+    default: ""
+  retries:
+    description: Total attempts (1-10).
+    required: false
+    default: "3"
+  retry-delay:
+    description: Seconds between attempts.
+    required: false
+    default: "10"
+  fail-on-error:
+    description: Fail the step when the deploy fails.
+    required: false
+    default: "true"
+  github-deployment:
+    description: Record a GitHub Deployment (in_progress, then success/failure) in `environment`.
+    required: false
+    default: "false"
+  environment:
+    description: GitHub environment name for the deployment record.
+    required: false
+    default: production
+  github-token:
+    description: Token for the deployment record (needs deployments write).
+    required: false
+    default: ${{ github.token }}
+  label:
+    description: Name used in the job summary and the {label} placeholder.
+    required: false
+    default: production
+  summary:
+    description: Write a job-summary section.
+    required: false
+    default: "true"
+
+outputs:
+  outcome:
+    description: success, failure, or skipped.
+    value: ${{ steps.deploy.outputs.outcome || (steps.check.outputs.ok == 'false' && 'skipped' || '') }}
+  url:
+    description: The production URL.
+    value: ${{ steps.deploy.outputs.url }}
+  version-id:
+    description: The deployed version's id.
+    value: ${{ steps.deploy.outputs.version-id }}
+  targets:
+    description: JSON array of the trigger targets wrangler reported.
+    value: ${{ steps.deploy.outputs.targets }}
+  deployment-id:
+    description: GitHub deployment id, when github-deployment is true.
+    value: ${{ steps.start.outputs.deployment-id }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        CFP_MISSING_SECRETS: ${{ inputs.missing-secrets }}
+        CFP_WHAT: production deploy
+      run: node "$GITHUB_ACTION_PATH/../src/check-secrets.mjs"
+
+    - id: start
+      if: ${{ steps.check.outputs.ok == 'true' && inputs.github-deployment == 'true' }}
+      shell: bash
+      env:
+        CFP_GITHUB_TOKEN: ${{ inputs.github-token }}
+        CFP_ENVIRONMENT: ${{ inputs.environment }}
+        CFP_LABEL: ${{ inputs.label }}
+        CFP_STATE: in_progress
+        CFP_PRODUCTION: "true"
+        CFP_TRANSIENT: "false"
+      run: node "$GITHUB_ACTION_PATH/../src/deployment.mjs"
+
+    - id: deploy
+      if: ${{ steps.check.outputs.ok == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        CFP_WRANGLER_COMMAND: ${{ inputs.wrangler-command }}
+        CFP_WRANGLER_CONFIG: ${{ inputs.wrangler-config }}
+        CFP_WRANGLER_ARGS: ${{ inputs.wrangler-args }}
+        CFP_TAG: ${{ inputs.tag }}
+        CFP_MESSAGE: ${{ inputs.message }}
+        CFP_URL: ${{ inputs.url }}
+        CFP_LABEL: ${{ inputs.label }}
+        CFP_RETRIES: ${{ inputs.retries }}
+        CFP_RETRY_DELAY: ${{ inputs.retry-delay }}
+        # The record is finished below whatever happens, so this step only fails at the end.
+        CFP_FAIL_ON_ERROR: "false"
+        CFP_SUMMARY: ${{ inputs.summary }}
+      run: node "$GITHUB_ACTION_PATH/../src/deploy.mjs"
+
+    - id: finish
+      if: ${{ !cancelled() && steps.start.outputs.deployment-id != '' }}
+      shell: bash
+      env:
+        CFP_GITHUB_TOKEN: ${{ inputs.github-token }}
+        CFP_ENVIRONMENT: ${{ inputs.environment }}
+        CFP_LABEL: ${{ inputs.label }}
+        CFP_DEPLOYMENT_ID: ${{ steps.start.outputs.deployment-id }}
+        CFP_STATE: ${{ steps.deploy.outputs.outcome == 'success' && 'success' || 'failure' }}
+        CFP_ENVIRONMENT_URL: ${{ steps.deploy.outputs.url }}
+        CFP_PRODUCTION: "true"
+        CFP_TRANSIENT: "false"
+      run: node "$GITHUB_ACTION_PATH/../src/deployment.mjs"
+
+    - name: Fail when the deploy failed
+      if: ${{ !cancelled() && steps.deploy.outputs.outcome == 'failure' && inputs.fail-on-error == 'true' }}
+      shell: bash
+      run: |
+        echo "The production deploy failed (see the wrangler output above); failing because fail-on-error is true."
+        exit 1

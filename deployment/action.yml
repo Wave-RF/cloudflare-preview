@@ -1,0 +1,110 @@
+name: Cloudflare preview / deployment
+description: >-
+  Record a GitHub Deployment and its status (the PR's "View deployment" button and the
+  repo's Environments page). Create-and-set in one call, start/finish across two calls
+  with deployment-id, or deactivate a closed PR's deployments with state=inactive.
+author: Wave RF
+
+# Permissions: deployments: write
+
+inputs:
+  github-token:
+    description: Token with deployments write.
+    required: false
+    default: ${{ github.token }}
+  state:
+    description: "queued, in_progress, pending, success, failure, error or inactive. inactive with no deployment-id deactivates every deployment of this PR in the environment."
+    required: false
+    default: success
+  deployment-id:
+    description: Post the status on this existing deployment instead of creating one.
+    required: false
+    default: ""
+  environment:
+    description: "Environment name pattern ({pr} {sha7} {branch} {label} {run}). Empty → `preview/{label}` (or `preview` for the default label). One shared name per app keeps the Environments page short."
+    required: false
+    default: ""
+  label:
+    description: Used by {label} and the default environment.
+    required: false
+    default: preview
+  environment-url:
+    description: The URL people should open (the alias URL for a preview). Set on success only.
+    required: false
+    default: ""
+  log-url:
+    description: Link for "View logs". Empty → this workflow run.
+    required: false
+    default: ""
+  description:
+    description: Short description (GitHub's limit is 140 characters; longer is cut).
+    required: false
+    default: ""
+  transient:
+    description: transient_environment. Empty → true unless production is true.
+    required: false
+    default: ""
+  production:
+    description: production_environment.
+    required: false
+    default: "false"
+  delete:
+    description: >-
+      With state=inactive and no deployment-id (PR closed): also DELETE the PR's deployment records after
+      deactivating them, so the environment's history does not grow without bound. Same permission
+      (deployments: write).
+    required: false
+    default: "false"
+  deactivate-previous:
+    description: After a success, mark this PR's earlier deployments in the environment inactive.
+    required: false
+    default: "true"
+  pr:
+    description: Pull request number. Empty → from the event.
+    required: false
+    default: ""
+  sha:
+    description: Commit to record. Empty → the PR head or GITHUB_SHA.
+    required: false
+    default: ""
+  fail-on-error:
+    description: Fail on a GitHub API error. Default false — the record is a convenience, so a failure warns.
+    required: false
+    default: "false"
+
+outputs:
+  deployment-id:
+    description: The deployment's id (pass it back in with a later state).
+    value: ${{ steps.run.outputs.deployment-id }}
+  environment:
+    description: The rendered environment name.
+    value: ${{ steps.run.outputs.environment }}
+  deactivated:
+    description: How many deployments were marked inactive (PR-close mode).
+    value: ${{ steps.run.outputs.deactivated }}
+  deleted:
+    description: How many deployment records were deleted (PR-close mode with delete).
+    value: ${{ steps.run.outputs.deleted }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        CFP_GITHUB_TOKEN: ${{ inputs.github-token }}
+        CFP_STATE: ${{ inputs.state }}
+        CFP_DEPLOYMENT_ID: ${{ inputs.deployment-id }}
+        CFP_ENVIRONMENT: ${{ inputs.environment }}
+        CFP_LABEL: ${{ inputs.label }}
+        CFP_ENVIRONMENT_URL: ${{ inputs.environment-url }}
+        CFP_LOG_URL: ${{ inputs.log-url }}
+        CFP_DESCRIPTION: ${{ inputs.description }}
+        CFP_TRANSIENT: ${{ inputs.transient }}
+        CFP_PRODUCTION: ${{ inputs.production }}
+        CFP_DEACTIVATE_PREVIOUS: ${{ inputs.deactivate-previous }}
+        CFP_PR: ${{ inputs.pr }}
+        CFP_SHA: ${{ inputs.sha }}
+        CFP_DELETE: ${{ inputs.delete }}
+        CFP_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: node "$GITHUB_ACTION_PATH/../src/deployment.mjs"

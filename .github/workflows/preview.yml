@@ -1,0 +1,332 @@
+name: Cloudflare preview (reusable)
+
+# A thin reusable workflow built only from this repo's composite actions:
+#
+#   build       checks out the PR head, installs, runs your build command and uploads
+#               the output directory as an artifact. NO Cloudflare secrets in this job.
+#   preview     PRs: checks out the PR head (or, with trusted-checkout, the default
+#               branch), installs, drops the artifact in place and runs the root action:
+#               versions upload + GitHub Deployment + sticky comment.
+#   production  pushes to the default branch, when `production: true`: wrangler deploy.
+#   cleanup     closed PRs: marks the PR's preview deployments inactive (and, with
+#               delete-closed-deployments, deletes them).
+#
+# Guards: fork PRs and Dependabot runs are skipped (neither gets repository secrets).
+#
+# Caller:
+#   on:
+#     pull_request: { types: [opened, synchronize, reopened, closed] }
+#     push: { branches: [main] }
+#   jobs:
+#     docs:
+#       uses: Wave-RF/cloudflare-preview/.github/workflows/preview.yml@<sha> # v1.x.y
+#       permissions: { contents: read, pull-requests: write, deployments: write }
+#       with: { build-command: pnpm build, working-directory: docs, label: docs }
+#       secrets:
+#         CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+#         CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+#
+# The caller's `permissions:` caps what these jobs can have; the jobs ask for less
+# where they can.
+
+on:
+  workflow_call:
+    inputs:
+      build-command:
+        description: Command that builds the site, run in working-directory (bash -c). Runs with no Cloudflare secrets.
+        type: string
+        required: true
+      working-directory:
+        description: Directory with package.json and the wrangler config.
+        type: string
+        default: "."
+      output-dir:
+        description: Build output, relative to working-directory. Uploaded between jobs and placed back before wrangler runs.
+        type: string
+        default: dist
+      package-manager:
+        description: pnpm, npm or yarn. Picks the setup step and the default install command.
+        type: string
+        default: pnpm
+      pnpm-version:
+        description: pnpm version. Empty → the packageManager field in the repository-root package.json.
+        type: string
+        default: ""
+      node-version:
+        description: Node.js version for setup-node.
+        type: string
+        default: "22"
+      install-command:
+        description: Override the install command (bash -c). Empty → `pnpm install --frozen-lockfile` / `npm ci` / `yarn install --frozen-lockfile`.
+        type: string
+        default: ""
+      wrangler-command:
+        description: Override how wrangler is invoked. Empty → the repo's own install, detected from its lockfile (see the README).
+        type: string
+        default: ""
+      wrangler-config:
+        description: Path to the wrangler config, relative to working-directory.
+        type: string
+        default: ""
+      wrangler-args:
+        description: Extra arguments for `wrangler versions upload` (and `wrangler deploy`).
+        type: string
+        default: ""
+      label:
+        description: Preview name; one comment, environment and artifact per label.
+        type: string
+        default: preview
+      alias:
+        description: --preview-alias pattern.
+        type: string
+        default: pr-{pr}
+      environment:
+        description: GitHub environment pattern for previews. Empty → `preview/{label}`.
+        type: string
+        default: ""
+      comment-title:
+        description: Comment heading pattern.
+        type: string
+        default: ""
+      comment-template:
+        description: Comment body template (see preview-comment/action.yml).
+        type: string
+        default: ""
+      timezone:
+        description: IANA zone for the comment's timestamps.
+        type: string
+        default: UTC
+      retries:
+        description: Upload/deploy attempts.
+        type: string
+        default: "3"
+      fail-on-error:
+        description: Red the preview job when the upload fails.
+        type: boolean
+        default: true
+      trusted-checkout:
+        description: >-
+          Run wrangler, the Worker source and the wrangler config from the DEFAULT BRANCH, with only
+          the built output coming from the PR (as an artifact). A PR's changes to dependencies,
+          worker code or wrangler config then take effect on merge, not in its preview.
+        type: boolean
+        default: false
+      production:
+        description: On a push to the default branch, `wrangler deploy` to production.
+        type: boolean
+        default: false
+      delete-closed-deployments:
+        description: >-
+          On PR close, DELETE the PR's deployment records (after deactivating them) instead of only
+          deactivating them, so the environment's history does not grow without bound.
+        type: boolean
+        default: false
+      production-url:
+        description: Public production URL. Empty → derived from the deploy's triggers.
+        type: string
+        default: ""
+      runs-on:
+        description: Runner label(s) as JSON, e.g. '"ubuntu-latest"' or '["self-hosted","linux"]'.
+        type: string
+        default: '"ubuntu-latest"'
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: false
+      CLOUDFLARE_ACCOUNT_ID:
+        required: false
+    outputs:
+      alias-url:
+        description: Stable per-PR preview URL.
+        value: ${{ jobs.preview.outputs.alias-url }}
+      version-url:
+        description: This commit's preview URL.
+        value: ${{ jobs.preview.outputs.version-url }}
+      production-url:
+        description: Production URL after a deploy.
+        value: ${{ jobs.production.outputs.url }}
+
+permissions: {}
+
+jobs:
+  build:
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.action != 'closed' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.actor != 'dependabot[bot]') ||
+      (inputs.production && github.event_name == 'push' &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - if: ${{ inputs.package-manager == 'pnpm' }}
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ inputs.pnpm-version }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Install
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PM: ${{ inputs.package-manager }}
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: |
+          case "$PM" in
+            pnpm) default='pnpm install --frozen-lockfile' ;;
+            npm)  default='npm ci' ;;
+            yarn) default='yarn install --frozen-lockfile' ;;
+            *) echo "::error::package-manager must be pnpm, npm or yarn"; exit 1 ;;
+          esac
+          bash -c "${INSTALL_COMMAND:-$default}"
+      - name: Build
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        run: bash -c "$BUILD_COMMAND"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cloudflare-preview-${{ inputs.label }}
+          path: ${{ inputs.working-directory }}/${{ inputs.output-dir }}
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 3
+
+  preview:
+    needs: build
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      deployments: write
+    concurrency:
+      group: cloudflare-preview-${{ github.repository }}-${{ inputs.label }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    outputs:
+      alias-url: ${{ steps.preview.outputs.alias-url }}
+      version-url: ${{ steps.preview.outputs.version-url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.trusted-checkout && github.event.repository.default_branch || github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - if: ${{ inputs.package-manager == 'pnpm' }}
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ inputs.pnpm-version }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Install
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PM: ${{ inputs.package-manager }}
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: |
+          case "$PM" in
+            pnpm) default='pnpm install --frozen-lockfile' ;;
+            npm)  default='npm ci' ;;
+            yarn) default='yarn install --frozen-lockfile' ;;
+            *) echo "::error::package-manager must be pnpm, npm or yarn"; exit 1 ;;
+          esac
+          bash -c "${INSTALL_COMMAND:-$default}"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cloudflare-preview-${{ inputs.label }}
+          path: ${{ inputs.working-directory }}/${{ inputs.output-dir }}
+      - id: preview
+        uses: Wave-RF/cloudflare-preview@v1.0.0 # x-release-please-version
+        with:
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          working-directory: ${{ inputs.working-directory }}
+          wrangler-command: ${{ inputs.wrangler-command }}
+          wrangler-config: ${{ inputs.wrangler-config }}
+          wrangler-args: ${{ inputs.wrangler-args }}
+          label: ${{ inputs.label }}
+          alias: ${{ inputs.alias }}
+          environment: ${{ inputs.environment }}
+          comment-title: ${{ inputs.comment-title }}
+          comment-template: ${{ inputs.comment-template }}
+          timezone: ${{ inputs.timezone }}
+          retries: ${{ inputs.retries }}
+          fail-on-error: ${{ inputs.fail-on-error }}
+
+  production:
+    needs: build
+    if: ${{ inputs.production && github.event_name == 'push' }}
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      deployments: write
+    concurrency:
+      group: cloudflare-production-${{ github.repository }}-${{ inputs.label }}
+      cancel-in-progress: false
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      # A push to the default branch IS the trusted tree.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: ${{ inputs.package-manager == 'pnpm' }}
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ inputs.pnpm-version }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Install
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PM: ${{ inputs.package-manager }}
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: |
+          case "$PM" in
+            pnpm) default='pnpm install --frozen-lockfile' ;;
+            npm)  default='npm ci' ;;
+            yarn) default='yarn install --frozen-lockfile' ;;
+            *) echo "::error::package-manager must be pnpm, npm or yarn"; exit 1 ;;
+          esac
+          bash -c "${INSTALL_COMMAND:-$default}"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cloudflare-preview-${{ inputs.label }}
+          path: ${{ inputs.working-directory }}/${{ inputs.output-dir }}
+      - id: deploy
+        uses: Wave-RF/cloudflare-preview/deploy@v1.0.0 # x-release-please-version
+        with:
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # On the default branch a missing secret is misconfiguration, not a fork.
+          missing-secrets: fail
+          working-directory: ${{ inputs.working-directory }}
+          wrangler-command: ${{ inputs.wrangler-command }}
+          wrangler-config: ${{ inputs.wrangler-config }}
+          wrangler-args: ${{ inputs.wrangler-args }}
+          url: ${{ inputs.production-url }}
+          retries: ${{ inputs.retries }}
+          github-deployment: "true"
+
+  cleanup:
+    if: ${{ github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    timeout-minutes: 5
+    permissions:
+      deployments: write
+    steps:
+      - uses: Wave-RF/cloudflare-preview/deployment@v1.0.0 # x-release-please-version
+        with:
+          state: inactive
+          delete: ${{ inputs.delete-closed-deployments }}
+          label: ${{ inputs.label }}
+          environment: ${{ inputs.environment }}

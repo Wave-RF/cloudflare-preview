@@ -1,0 +1,248 @@
+name: Cloudflare Worker preview
+description: >-
+  Upload a Cloudflare Worker preview version from GitHub Actions, record it as a GitHub
+  Deployment, and keep one sticky PR comment with the stable alias URL and this
+  commit's own URL. For builds Cloudflare Workers Builds cannot run.
+author: Wave RF
+branding:
+  icon: cloud
+  color: orange
+
+# Permissions this needs on the calling job:
+#   contents: read          (checkout, and the commit lookup for the comment)
+#   pull-requests: write    (the sticky comment; GitHub also accepts issues: write)
+#   deployments: write      (the Deployment record; only when deployment is true)
+#
+# This is upload + deployment + preview-comment in one step. Each piece is also its own
+# action (upload/, deployment/, preview-comment/, comment/, deploy/) for anyone who
+# wants a different arrangement.
+
+inputs:
+  cloudflare-api-token:
+    description: Cloudflare API token with Workers edit permission. Pass a secret. Empty → skipped (see missing-secrets).
+    required: false
+    default: ""
+  cloudflare-account-id:
+    description: Cloudflare account id.
+    required: false
+    default: ""
+  github-token:
+    description: Token for the comment and the deployment record.
+    required: false
+    default: ${{ github.token }}
+  missing-secrets:
+    description: "`skip` (warn and do nothing) or `fail` when the Cloudflare token or account id is empty. `ignore` skips the check, for a wrangler-command that injects its own credentials (a secrets-manager wrapper)."
+    required: false
+    default: skip
+  working-directory:
+    description: Directory wrangler runs in.
+    required: false
+    default: "."
+  wrangler-command:
+    description: >-
+      How to invoke wrangler. Empty → the repo's own install, found from the nearest lockfile at or above
+      working-directory: pnpm-lock.yaml → `pnpm exec wrangler`, yarn.lock → `yarn wrangler`,
+      bun.lock(b) → `bunx --no-install wrangler`, package-lock.json or none → node_modules/.bin/wrangler.
+      None of these downloads anything. Set it to override, e.g. a wrapper that injects secrets
+      (`./scripts/with-secrets.sh pnpm exec wrangler`). Split like a shell would, never run through one.
+    required: false
+    default: ""
+  wrangler-config:
+    description: Path to the wrangler config, relative to working-directory. Empty → wrangler's own lookup.
+    required: false
+    default: ""
+  wrangler-args:
+    description: Extra arguments for `wrangler versions upload`.
+    required: false
+    default: ""
+  label:
+    description: Name of this preview (`docs`, `app`). One comment and one environment per label, so a PR can carry several.
+    required: false
+    default: preview
+  alias:
+    description: --preview-alias pattern. Placeholders {pr} {sha} {sha7} {branch} {label} {run}. Empty → no alias.
+    required: false
+    default: pr-{pr}
+  tag:
+    description: --tag pattern for the version. Empty → omitted.
+    required: false
+    default: pr-{pr}
+  message:
+    description: --message pattern for the version. Empty → omitted.
+    required: false
+    default: "Preview of #{pr} at {sha7}"
+  retries:
+    description: Total upload attempts (1-10).
+    required: false
+    default: "3"
+  retry-delay:
+    description: Seconds between attempts.
+    required: false
+    default: "10"
+  fail-on-error:
+    description: Fail the job when the upload fails (after the comment and the deployment record are updated).
+    required: false
+    default: "true"
+  comment:
+    description: Post/update the sticky PR comment.
+    required: false
+    default: "true"
+  comment-marker:
+    description: Marker pattern for the sticky comment.
+    required: false
+    default: <!-- preview:{label} -->
+  comment-title:
+    description: Heading pattern. Empty → "Preview" or "<label> preview".
+    required: false
+    default: ""
+  comment-template:
+    description: Markdown body template (see preview-comment/ for the placeholders). Empty → the default layout.
+    required: false
+    default: ""
+  comment-author:
+    description: Only adopt an existing marker comment by this login. `*` = any.
+    required: false
+    default: github-actions[bot]
+  history-limit:
+    description: Earlier commits kept in the comment's collapsed history.
+    required: false
+    default: "10"
+  timezone:
+    description: IANA time zone for the comment's timestamps.
+    required: false
+    default: UTC
+  deployment:
+    description: Record a GitHub Deployment (in_progress → success/failure) with the alias URL.
+    required: false
+    default: "true"
+  environment:
+    description: Deployment environment pattern. Empty → `preview/{label}` (`preview` for the default label).
+    required: false
+    default: ""
+  pr:
+    description: Pull request number. Empty → from the event.
+    required: false
+    default: ""
+  sha:
+    description: Commit being previewed. Empty → the PR head.
+    required: false
+    default: ""
+  summary:
+    description: Write a job-summary section.
+    required: false
+    default: "true"
+
+outputs:
+  outcome:
+    description: success, failure, or skipped.
+    value: ${{ steps.upload.outputs.outcome || (steps.check.outputs.ok == 'false' && 'skipped' || '') }}
+  alias-url:
+    description: Stable per-PR URL.
+    value: ${{ steps.upload.outputs.alias-url }}
+  version-url:
+    description: This commit's URL.
+    value: ${{ steps.upload.outputs.version-url }}
+  version-id:
+    description: The uploaded version's id.
+    value: ${{ steps.upload.outputs.version-id }}
+  url:
+    description: alias-url when present, else version-url.
+    value: ${{ steps.upload.outputs.url }}
+  deployment-id:
+    description: The GitHub deployment id.
+    value: ${{ steps.start.outputs.deployment-id }}
+  comment-url:
+    description: The sticky comment's URL.
+    value: ${{ steps.comment.outputs.comment-url }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        CFP_MISSING_SECRETS: ${{ inputs.missing-secrets }}
+        CFP_WHAT: preview upload
+      run: node "$GITHUB_ACTION_PATH/src/check-secrets.mjs"
+
+    - id: start
+      if: ${{ steps.check.outputs.ok == 'true' && inputs.deployment == 'true' }}
+      shell: bash
+      env:
+        CFP_GITHUB_TOKEN: ${{ inputs.github-token }}
+        CFP_STATE: in_progress
+        CFP_ENVIRONMENT: ${{ inputs.environment }}
+        CFP_LABEL: ${{ inputs.label }}
+        CFP_PR: ${{ inputs.pr }}
+        CFP_SHA: ${{ inputs.sha }}
+      run: node "$GITHUB_ACTION_PATH/src/deployment.mjs"
+
+    - id: upload
+      if: ${{ steps.check.outputs.ok == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        CFP_WRANGLER_COMMAND: ${{ inputs.wrangler-command }}
+        CFP_WRANGLER_CONFIG: ${{ inputs.wrangler-config }}
+        CFP_WRANGLER_ARGS: ${{ inputs.wrangler-args }}
+        CFP_LABEL: ${{ inputs.label }}
+        CFP_ALIAS: ${{ inputs.alias }}
+        CFP_TAG: ${{ inputs.tag }}
+        CFP_MESSAGE: ${{ inputs.message }}
+        CFP_RETRIES: ${{ inputs.retries }}
+        CFP_RETRY_DELAY: ${{ inputs.retry-delay }}
+        # The comment and the deployment record must be updated on failure too, so this
+        # step records the outcome and the last step fails the job.
+        CFP_FAIL_ON_ERROR: "false"
+        CFP_PR: ${{ inputs.pr }}
+        CFP_SHA: ${{ inputs.sha }}
+        CFP_SUMMARY: ${{ inputs.summary }}
+      run: node "$GITHUB_ACTION_PATH/src/upload.mjs"
+
+    - id: finish
+      if: ${{ !cancelled() && steps.start.outputs.deployment-id != '' }}
+      shell: bash
+      env:
+        CFP_GITHUB_TOKEN: ${{ inputs.github-token }}
+        CFP_DEPLOYMENT_ID: ${{ steps.start.outputs.deployment-id }}
+        CFP_STATE: ${{ steps.upload.outputs.outcome == 'success' && 'success' || 'failure' }}
+        CFP_ENVIRONMENT: ${{ inputs.environment }}
+        CFP_ENVIRONMENT_URL: ${{ steps.upload.outputs.url }}
+        CFP_DESCRIPTION: ${{ steps.upload.outputs.outcome == 'success' && 'Cloudflare preview' || 'Cloudflare preview upload failed' }}
+        CFP_LABEL: ${{ inputs.label }}
+        CFP_PR: ${{ inputs.pr }}
+        CFP_SHA: ${{ inputs.sha }}
+      run: node "$GITHUB_ACTION_PATH/src/deployment.mjs"
+
+    - id: comment
+      if: ${{ !cancelled() && inputs.comment == 'true' && (steps.upload.outputs.outcome == 'success' || steps.upload.outputs.outcome == 'failure') }}
+      shell: bash
+      env:
+        CFP_GITHUB_TOKEN: ${{ inputs.github-token }}
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }} # only so the redactor can mask it literally
+        CFP_OUTCOME: ${{ steps.upload.outputs.outcome }}
+        CFP_ATTEMPTS: ${{ steps.upload.outputs.attempts }}
+        CFP_ALIAS_URL: ${{ steps.upload.outputs.alias-url }}
+        CFP_VERSION_URL: ${{ steps.upload.outputs.version-url }}
+        CFP_VERSION_ID: ${{ steps.upload.outputs.version-id }}
+        CFP_LABEL: ${{ inputs.label }}
+        CFP_MARKER: ${{ inputs.comment-marker }}
+        CFP_TITLE: ${{ inputs.comment-title }}
+        CFP_TEMPLATE: ${{ inputs.comment-template }}
+        CFP_TIMEZONE: ${{ inputs.timezone }}
+        CFP_HISTORY_LIMIT: ${{ inputs.history-limit }}
+        CFP_AUTHOR: ${{ inputs.comment-author }}
+        CFP_PR: ${{ inputs.pr }}
+        CFP_SHA: ${{ inputs.sha }}
+      run: node "$GITHUB_ACTION_PATH/src/preview-comment.mjs"
+
+    - name: Fail when the upload failed
+      if: ${{ !cancelled() && steps.upload.outputs.outcome == 'failure' && inputs.fail-on-error == 'true' }}
+      shell: bash
+      run: |
+        echo "The preview upload failed (see the wrangler output above); failing because fail-on-error is true."
+        exit 1

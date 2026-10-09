@@ -1,0 +1,146 @@
+name: Cloudflare preview / upload
+description: >-
+  Upload a Cloudflare Worker version with `wrangler versions upload` (not deployed to
+  production), with retries and a stable per-PR --preview-alias. Outputs the alias URL
+  (stable per PR) and the version URL (unique per commit).
+author: Wave RF
+
+# Permissions: none from GitHub. Needs a Cloudflare API token that can edit Workers.
+
+inputs:
+  cloudflare-api-token:
+    description: Cloudflare API token (pass a secret). Empty → skipped with a warning, or failed with missing-secrets=fail.
+    required: false
+    default: ""
+  cloudflare-account-id:
+    description: Cloudflare account id (pass a secret or variable).
+    required: false
+    default: ""
+  missing-secrets:
+    description: "`skip` (warn, set outcome=skipped) or `fail` when the token or account id is empty. Fork PRs and Dependabot runs get no secrets. `ignore` skips the check, for a wrangler-command that injects its own credentials (a secrets-manager wrapper)."
+    required: false
+    default: skip
+  working-directory:
+    description: Directory wrangler runs in (where its config and node_modules live).
+    required: false
+    default: "."
+  wrangler-command:
+    description: >-
+      How to invoke wrangler. Empty → the repo's own install, found from the nearest lockfile at or above
+      working-directory: pnpm-lock.yaml → `pnpm exec wrangler`, yarn.lock → `yarn wrangler`,
+      bun.lock(b) → `bunx --no-install wrangler`, package-lock.json or none → node_modules/.bin/wrangler.
+      None of these downloads anything. Set it to override, e.g. a wrapper that injects secrets
+      (`./scripts/with-secrets.sh pnpm exec wrangler`). Split like a shell would, never run through one.
+    required: false
+    default: ""
+  wrangler-config:
+    description: Path to the wrangler config, relative to working-directory. Empty → wrangler's own lookup.
+    required: false
+    default: ""
+  wrangler-args:
+    description: Extra arguments for `wrangler versions upload`, e.g. `--env staging`.
+    required: false
+    default: ""
+  label:
+    description: Short name for this preview (`docs`, `app`). Used in {label} placeholders.
+    required: false
+    default: preview
+  alias:
+    description: >-
+      --preview-alias pattern. Placeholders: {pr} {sha} {sha7} {branch} {label} {run}. Sanitised to
+      Cloudflare's rules (lowercase, digits, dashes, starts with a letter). With no PR, {pr} falls back to
+      the branch name. Empty → no alias.
+    required: false
+    default: pr-{pr}
+  tag:
+    description: --tag pattern for the version (same placeholders). Empty → omitted.
+    required: false
+    default: pr-{pr}
+  message:
+    description: --message pattern for the version (same placeholders). Empty → omitted.
+    required: false
+    default: "Preview of #{pr} at {sha7}"
+  retries:
+    description: Total attempts (1-10). Cloudflare authentication errors (code 10000) are not retried.
+    required: false
+    default: "3"
+  retry-delay:
+    description: Seconds between attempts (wrangler's retry_after_ms wins when larger).
+    required: false
+    default: "10"
+  fail-on-error:
+    description: Fail the step when the upload fails. `false` → outcome=failure and an error annotation only.
+    required: false
+    default: "true"
+  pr:
+    description: Pull request number. Empty → from the event.
+    required: false
+    default: ""
+  sha:
+    description: Commit being previewed. Empty → the PR head (pull_request) or GITHUB_SHA.
+    required: false
+    default: ""
+  summary:
+    description: Write a job-summary section.
+    required: false
+    default: "true"
+
+outputs:
+  outcome:
+    description: success, failure, or skipped (missing secrets).
+    value: ${{ steps.upload.outputs.outcome || (steps.check.outputs.ok == 'false' && 'skipped' || '') }}
+  alias-url:
+    description: Stable per-PR URL (follows the latest upload with this alias). Empty when no alias was set or reported.
+    value: ${{ steps.upload.outputs.alias-url }}
+  version-url:
+    description: Per-commit URL (this exact version, never changes).
+    value: ${{ steps.upload.outputs.version-url }}
+  version-id:
+    description: The uploaded version's id.
+    value: ${{ steps.upload.outputs.version-id }}
+  url:
+    description: alias-url when present, else version-url.
+    value: ${{ steps.upload.outputs.url }}
+  alias:
+    description: The sanitised alias that was passed to --preview-alias.
+    value: ${{ steps.upload.outputs.alias }}
+  worker-name:
+    description: Worker name as wrangler reported it.
+    value: ${{ steps.upload.outputs.worker-name }}
+  attempts:
+    description: How many attempts were made.
+    value: ${{ steps.upload.outputs.attempts }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        CFP_MISSING_SECRETS: ${{ inputs.missing-secrets }}
+        CFP_WHAT: preview upload
+      run: node "$GITHUB_ACTION_PATH/../src/check-secrets.mjs"
+
+    - id: upload
+      if: ${{ steps.check.outputs.ok == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        CFP_WRANGLER_COMMAND: ${{ inputs.wrangler-command }}
+        CFP_WRANGLER_CONFIG: ${{ inputs.wrangler-config }}
+        CFP_WRANGLER_ARGS: ${{ inputs.wrangler-args }}
+        CFP_LABEL: ${{ inputs.label }}
+        CFP_ALIAS: ${{ inputs.alias }}
+        CFP_TAG: ${{ inputs.tag }}
+        CFP_MESSAGE: ${{ inputs.message }}
+        CFP_RETRIES: ${{ inputs.retries }}
+        CFP_RETRY_DELAY: ${{ inputs.retry-delay }}
+        CFP_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        CFP_PR: ${{ inputs.pr }}
+        CFP_SHA: ${{ inputs.sha }}
+        CFP_SUMMARY: ${{ inputs.summary }}
+      run: node "$GITHUB_ACTION_PATH/../src/upload.mjs"

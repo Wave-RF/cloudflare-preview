@@ -1,0 +1,76 @@
+name: Cloudflare preview / sticky comment
+description: >-
+  Post or update ONE comment on a PR or issue, found by a hidden marker. Any body, any
+  marker. Redacts credentials before posting and refuses (fails) on one it cannot mask;
+  truncates under GitHub's 65,536-character limit.
+author: Wave RF
+
+# Permissions: pull-requests: write for a PR, issues: write for an issue.
+
+inputs:
+  marker:
+    description: "A single-line HTML comment that identifies the comment, e.g. `<!-- dependabot-major-bump -->`. The body is posted after it."
+    required: true
+  body:
+    description: Markdown body. Ignored when body-file is set.
+    required: false
+    default: ""
+  body-file:
+    description: Read the body from this file instead (relative to the workspace).
+    required: false
+    default: ""
+  number:
+    description: PR or issue number. Empty → from the event.
+    required: false
+    default: ""
+  mode:
+    description: "`upsert` (create or update) or `delete` (remove the sticky comment if present)."
+    required: false
+    default: upsert
+  author:
+    description: >-
+      Only adopt an existing marker comment posted by this login, so a stranger's comment that
+      starts with the marker is never edited. `github-actions[bot]` matches GITHUB_TOKEN; use your
+      app's `<slug>[bot]` or the PAT user's login; `*` adopts any author.
+    required: false
+    default: github-actions[bot]
+  mask-values:
+    description: Extra literal values to redact, one per line (e.g. a secret the body might echo).
+    required: false
+    default: ""
+  github-token:
+    description: Token that posts the comment.
+    required: false
+    default: ${{ github.token }}
+  fail-on-error:
+    description: Fail on a GitHub API error. Default false — a failed comment warns and writes the intended body to the job summary. An unmaskable credential always fails.
+    required: false
+    default: "false"
+
+outputs:
+  comment-id:
+    description: The comment's id.
+    value: ${{ steps.run.outputs.comment-id }}
+  comment-url:
+    description: The comment's URL.
+    value: ${{ steps.run.outputs.comment-url }}
+  action:
+    description: created, updated, deleted, none, skipped or failed.
+    value: ${{ steps.run.outputs.action }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        CFP_GITHUB_TOKEN: ${{ inputs.github-token }}
+        CFP_MARKER: ${{ inputs.marker }}
+        CFP_BODY: ${{ inputs.body }}
+        CFP_BODY_FILE: ${{ inputs.body-file }}
+        CFP_NUMBER: ${{ inputs.number }}
+        CFP_MODE: ${{ inputs.mode }}
+        CFP_AUTHOR: ${{ inputs.author }}
+        CFP_MASK_VALUES: ${{ inputs.mask-values }}
+        CFP_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: node "$GITHUB_ACTION_PATH/../src/comment.mjs"

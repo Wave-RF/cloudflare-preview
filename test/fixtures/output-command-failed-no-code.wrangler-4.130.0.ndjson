@@ -1,0 +1,2 @@
+{"type":"wrangler-session","version":1,"wrangler_version":"4.130.0","command_line_args":["versions","upload","--preview-alias","Bad_Alias"],"log_file_path":"/home/runner/.wrangler/logs/wrangler-2026-10-09_13-39-47_635.log","timestamp":"2026-10-09T13:39:47.728Z"}
+{"type":"command-failed","version":1,"message":"You cannot upload a new version of a Worker that does not yet exist. Please run the `deploy` command first.","timestamp":"2026-10-09T13:39:49.399Z"}

@@ -1,0 +1,112 @@
+name: Cloudflare preview / preview comment
+description: >-
+  The sticky preview comment: the stable alias URL as the main link, this commit's own
+  URL beside it, commit, author and co-authors, timestamps, and a capped history of
+  earlier commits' URLs. On a failed upload it says so, and names what the alias still
+  serves, instead of leaving a stale "live".
+author: Wave RF
+
+# Permissions: pull-requests: write (+ contents: read, the default, for the commit lookup).
+
+inputs:
+  outcome:
+    description: The upload's outcome, `success` or `failure` (upload's `outcome` output).
+    required: true
+  alias-url:
+    description: upload's `alias-url` output.
+    required: false
+    default: ""
+  version-url:
+    description: upload's `version-url` output.
+    required: false
+    default: ""
+  version-id:
+    description: upload's `version-id` output.
+    required: false
+    default: ""
+  attempts:
+    description: upload's `attempts` output (named in the failure line).
+    required: false
+    default: "1"
+  label:
+    description: Preview name; one sticky comment per label, so a PR can carry several previews.
+    required: false
+    default: preview
+  marker:
+    description: Marker pattern ({label} {pr} ...). Must render to a single-line HTML comment.
+    required: false
+    default: <!-- preview:{label} -->
+  title:
+    description: Heading pattern. Empty → "Preview", or "<label> preview" for a custom label.
+    required: false
+    default: ""
+  template:
+    description: >-
+      Markdown body template. Empty → the default layout. Placeholders (values are already escaped):
+      {title} {status} {alias_url} {version_url} {version_id} {commit} {sha} {sha7} {subject} {authors}
+      {committed} {deployed} {deployed_label} {run_url} {history} {label} {pr} {outcome}.
+    required: false
+    default: ""
+  timezone:
+    description: IANA time zone for timestamps, e.g. America/New_York. DST-aware.
+    required: false
+    default: UTC
+  history-limit:
+    description: How many earlier commits to keep in the collapsed history (0-50).
+    required: false
+    default: "10"
+  author:
+    description: Only adopt an existing marker comment posted by this login (see comment/). `*` = any.
+    required: false
+    default: github-actions[bot]
+  pr:
+    description: Pull request number. Empty → from the event.
+    required: false
+    default: ""
+  sha:
+    description: The previewed commit. Empty → the PR head.
+    required: false
+    default: ""
+  github-token:
+    description: Token that posts the comment.
+    required: false
+    default: ${{ github.token }}
+  fail-on-error:
+    description: Fail on a GitHub API error (default warns). An unmaskable credential always fails.
+    required: false
+    default: "false"
+
+outputs:
+  comment-id:
+    description: The comment's id.
+    value: ${{ steps.run.outputs.comment-id }}
+  comment-url:
+    description: The comment's URL.
+    value: ${{ steps.run.outputs.comment-url }}
+  action:
+    description: created, updated, skipped or failed.
+    value: ${{ steps.run.outputs.action }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        CFP_GITHUB_TOKEN: ${{ inputs.github-token }}
+        CFP_OUTCOME: ${{ inputs.outcome }}
+        CFP_ALIAS_URL: ${{ inputs.alias-url }}
+        CFP_VERSION_URL: ${{ inputs.version-url }}
+        CFP_VERSION_ID: ${{ inputs.version-id }}
+        CFP_ATTEMPTS: ${{ inputs.attempts }}
+        CFP_LABEL: ${{ inputs.label }}
+        CFP_MARKER: ${{ inputs.marker }}
+        CFP_TITLE: ${{ inputs.title }}
+        CFP_TEMPLATE: ${{ inputs.template }}
+        CFP_TIMEZONE: ${{ inputs.timezone }}
+        CFP_HISTORY_LIMIT: ${{ inputs.history-limit }}
+        CFP_AUTHOR: ${{ inputs.author }}
+        CFP_PR: ${{ inputs.pr }}
+        CFP_SHA: ${{ inputs.sha }}
+        CFP_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: node "$GITHUB_ACTION_PATH/../src/preview-comment.mjs"

@@ -1,0 +1,2 @@
+{"type":"wrangler-session","version":1,"wrangler_version":"4.147.0","command_line_args":["versions","upload"],"log_file_path":"/home/runner/.config/.wrangler/logs/wrangler-2026-10-09_10-00-00_789.log","timestamp":"2026-10-09T10:00:00.000Z"}
+{"type":"command-failed","version":1,"code":10000,"message":"A request to the Cloudflare API (/accounts/abc/workers/scripts/x/versions) failed.\n  Authentication error [code: 10000]","timestamp":"2026-10-09T10:00:01.000Z"}

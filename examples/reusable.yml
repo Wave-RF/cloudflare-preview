@@ -1,0 +1,30 @@
+# Calling the reusable workflow: build, preview, production deploy and PR-close
+# cleanup, with no steps of your own.
+name: Site
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    uses: Wave-RF/cloudflare-preview/.github/workflows/preview.yml@v1 # pin to a commit SHA in production use
+    permissions:
+      contents: read
+      pull-requests: write
+      deployments: write
+    with:
+      build-command: pnpm build
+      working-directory: site
+      output-dir: dist
+      label: site
+      production: true
+      trusted-checkout: true
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

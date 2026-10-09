@@ -1,0 +1,26 @@
+# The comment action on its own, for anything that is not a preview: here, the
+# "major bump held for review" note on a Dependabot PR, updated in place.
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+      - if: ${{ steps.meta.outputs.update-type == 'version-update:semver-major' }}
+        uses: Wave-RF/cloudflare-preview/comment@v1
+        with:
+          marker: <!-- dependabot-major-bump-comment -->
+          body: >-
+            Major-version bump: holding for human review. Auto-merge is limited to
+            patch and minor updates. Read the dependency's changelog before merging.

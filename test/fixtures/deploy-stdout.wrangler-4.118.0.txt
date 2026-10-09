@@ -1,0 +1,24 @@
+ ⛅️ wrangler 4.118.0
+────────────────────
+🌀 Building list of assets...
+✨ Read 299 files from the assets directory /home/runner/work/example/example/docs/dist
+🌀 Starting asset upload...
+🌀 Found 33 new or modified static assets to upload. Proceeding with upload...
++ /pagefind/pagefind-entry.json
++ /pagefind/index/en_9c7703f.pf_index
++ /pagefind/index/en_c14a7e6.pf_index
+Uploaded 11 of 33 assets
+Uploaded 22 of 33 assets
+Uploaded 33 of 33 assets
+✨ Success! Uploaded 33 files (236 already uploaded) (1.94 sec)
+
+Total Upload: 2.91 KiB / gzip: 1.17 KiB
+Your Worker has access to the following bindings:
+Binding            Resource      
+env.ASSETS         Assets        
+
+Uploaded example-docs (8.09 sec)
+Deployed example-docs triggers (1.03 sec)
+  https://example-docs.example.workers.dev
+  www.example.com (custom domain)
+Current Version ID: c0ffee00-1234-4abc-8def-0123456789ab

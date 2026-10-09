@@ -1,0 +1,2 @@
+{"type":"wrangler-session","version":1,"wrangler_version":"4.130.0","command_line_args":["versions","upload","--dry-run","--preview-alias","pr-7","--tag","pr-7","--message","hi"],"log_file_path":"/home/runner/.wrangler/logs/wrangler-2026-10-09_13-39-46_654.log","timestamp":"2026-10-09T13:39:46.748Z"}
+{"type":"version-upload","version":1,"worker_name":"cfp-dry","worker_tag":null,"version_id":null,"worker_name_overridden":false,"bundle_size":{"raw_bytes":151,"gzip_bytes":139},"timestamp":"2026-10-09T13:39:46.895Z"}

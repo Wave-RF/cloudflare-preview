@@ -1,0 +1,29 @@
+ ⛅️ wrangler 4.118.0
+────────────────────
+🌀 Building list of assets...
+✨ Read 299 files from the assets directory /home/runner/work/example/example/docs/dist
+🌀 Starting asset upload...
+🌀 Found 35 new or modified static assets to upload. Proceeding with upload...
++ /pagefind/pagefind-entry.json
++ /pagefind/index/en_f286e6c.pf_index
++ /pagefind/index/en_db8c1a5.pf_index
+Uploaded 11 of 35 assets
+Uploaded 23 of 35 assets
+Uploaded 35 of 35 assets
+✨ Success! Uploaded 35 files (234 already uploaded) (2.15 sec)
+
+Total Upload: 2.91 KiB / gzip: 1.17 KiB
+Worker Startup Time: 0 ms
+Your Worker has access to the following bindings:
+Binding            Resource      
+env.ASSETS         Assets        
+
+Uploaded example-docs (4.46 sec)
+Worker Version ID: 0b9e8d7c-6a5f-4e3d-8c2b-1a0f9e8d7c6b
+Version Preview URL: https://0b9e8d7c-example-docs.example.workers.dev
+
+To deploy this version to production traffic use the command wrangler versions deploy
+
+Changes to non-versioned settings (config properties 'logpush' or 'tail_consumers') take effect after your next deployment using the command wrangler versions deploy
+
+Changes to triggers (routes, custom domains, cron schedules, etc) must be applied with the command wrangler triggers deploy

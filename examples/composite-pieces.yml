@@ -1,0 +1,92 @@
+# The pieces separately, for builds the root action does not fit. Here:
+#
+#   - secrets injected by a wrapper script: ./scripts/with-secrets.sh <cmd…> fetches
+#     credentials from a secrets manager and execs <cmd> with them in its environment,
+#     so the Cloudflare token never passes through GitHub secrets
+#     (wrangler-command + missing-secrets: ignore);
+#   - a mock build mode for previews (fixture data, no backend);
+#   - two apps previewed on one PR: one sticky comment and one environment per label.
+name: Frontends
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  deployments: write
+
+jobs:
+  preview:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true # a preview is a convenience; never block the PR on it
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [app, admin]
+    concurrency:
+      group: preview-${{ matrix.app }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build (mock mode)
+        working-directory: ${{ matrix.app }}
+        run: ../scripts/with-secrets.sh pnpm exec vite build --mode mock
+
+      - id: start
+        uses: Wave-RF/cloudflare-preview/deployment@v1
+        with:
+          state: in_progress
+          label: ${{ matrix.app }}
+
+      - id: upload
+        uses: Wave-RF/cloudflare-preview/upload@v1
+        with:
+          # The wrapper puts CLOUDFLARE_API_TOKEN/ACCOUNT_ID in wrangler's environment,
+          # so the inputs stay empty and the presence check is skipped.
+          missing-secrets: ignore
+          wrangler-command: ${{ github.workspace }}/scripts/with-secrets.sh pnpm exec wrangler
+          working-directory: ${{ matrix.app }}
+          label: ${{ matrix.app }}
+          tag: pr-{pr}-mock
+          message: "PR #{pr} mock preview ({sha7}): fixture data, never promote this version"
+          fail-on-error: "false" # the comment says it failed; the step stays green
+
+      - if: ${{ !cancelled() && steps.start.outputs.deployment-id != '' }}
+        uses: Wave-RF/cloudflare-preview/deployment@v1
+        with:
+          deployment-id: ${{ steps.start.outputs.deployment-id }}
+          state: ${{ steps.upload.outputs.outcome == 'success' && 'success' || 'failure' }}
+          environment-url: ${{ steps.upload.outputs.url }}
+          label: ${{ matrix.app }}
+
+      - if: ${{ !cancelled() && (steps.upload.outputs.outcome == 'success' || steps.upload.outputs.outcome == 'failure') }}
+        uses: Wave-RF/cloudflare-preview/preview-comment@v1
+        with:
+          outcome: ${{ steps.upload.outputs.outcome }}
+          alias-url: ${{ steps.upload.outputs.alias-url }}
+          version-url: ${{ steps.upload.outputs.version-url }}
+          version-id: ${{ steps.upload.outputs.version-id }}
+          attempts: ${{ steps.upload.outputs.attempts }}
+          label: ${{ matrix.app }}
+          template: |
+            ## {title}
+
+            {status}
+
+            Mock mode: fixture data, no sign-in.
+
+            - **Commit:** {commit} {subject}
+            - **Author:** {authors}
+            - **{deployed_label}:** {deployed} ([run]({run_url}))
+
+            {history}

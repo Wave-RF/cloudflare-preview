@@ -1,0 +1,2 @@
+{"type":"wrangler-session","version":1,"wrangler_version":"4.118.0","command_line_args":["deploy"],"log_file_path":"/home/runner/.config/.wrangler/logs/wrangler-2026-10-08_19-00-00_456.log","timestamp":"2026-10-08T19:00:00.000Z"}
+{"type":"deploy","version":1,"worker_name":"example-docs","worker_tag":"9f8e7d6c5b4a39281706f5e4d3c2b1a0","version_id":"c0ffee00-1234-4abc-8def-0123456789ab","targets":["https://example-docs.example.workers.dev","www.example.com (custom domain)"],"worker_name_overridden":false,"timestamp":"2026-10-08T19:00:09.120Z"}
