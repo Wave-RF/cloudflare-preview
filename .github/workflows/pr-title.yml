@@ -1,0 +1,31 @@
+name: PR title
+
+# Validates the PR title against Conventional Commits; the title becomes the
+# squash-merge subject release-please parses. pull_request_target runs the BASE
+# repo's copy of scripts/lint-pr-title.sh; the title arrives via env, never
+# interpolated into the script.
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    name: pr-title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate PR title (Conventional Commits)
+        if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: bash scripts/lint-pr-title.sh "$TITLE"

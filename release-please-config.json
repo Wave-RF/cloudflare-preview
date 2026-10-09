@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": false,
+      "initial-version": "1.0.0",
+      "extra-files": [
+        { "type": "generic", "path": ".github/workflows/preview.yml" }
+      ]
+    }
+  },
+  "$comment": "An action: tags are vX.Y.Z, and release.yml moves vMAJOR after each release. preview.yml pins this repo's own actions by version on lines marked x-release-please-version, so a reusable workflow at vX.Y.Z always runs the composite actions of vX.Y.Z."
+}

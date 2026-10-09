@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # The only dependencies are the SHA-pinned actions in workflows (no npm runtime deps).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
+    ignore:
+      # preview.yml references this repo's own release; release-please moves it.
+      - dependency-name: Wave-RF/cloudflare-preview
+    commit-message:
+      prefix: ci

@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # `go run module@version` is pinned and checked against sum.golang.org; Go and
+      # shellcheck are preinstalled on ubuntu-latest, and actionlint runs shellcheck
+      # over every run: block it lints.
+      - name: actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -color .github/workflows/*.yml examples/*.yml
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22", "24"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --test test/*.test.mjs
+
+  # The composite actions as GitHub runs them, with a fake wrangler: proves the
+  # action.yml wiring (env names, outputs, step conditions) without Cloudflare.
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: skipped
+        uses: ./upload
+        with:
+          cloudflare-api-token: ""
+          cloudflare-account-id: ""
+      - name: missing secrets skip the upload
+        env:
+          OUTCOME: ${{ steps.skipped.outputs.outcome }}
+        run: test "$OUTCOME" = skipped
+
+      - id: upload
+        uses: ./upload
+        env:
+          FAKE_NDJSON: ${{ github.workspace }}/test/fixtures/output-version-upload.ndjson
+          FAKE_STDOUT: ${{ github.workspace }}/test/fixtures/upload-stdout-alias.wrangler-4.147.0.txt
+        with:
+          cloudflare-api-token: fake-token-for-smoke
+          cloudflare-account-id: fake-account
+          wrangler-command: node test/helpers/fake-wrangler.mjs
+          pr: "42"
+          label: console
+      - name: upload outputs
+        env:
+          OUTCOME: ${{ steps.upload.outputs.outcome }}
+          ALIAS_URL: ${{ steps.upload.outputs.alias-url }}
+          VERSION_URL: ${{ steps.upload.outputs.version-url }}
+        run: |
+          test "$OUTCOME" = success
+          test "$ALIAS_URL" = https://pr-42-example-worker.example.workers.dev
+          test "$VERSION_URL" = https://5f3c1a2b-example-worker.example.workers.dev
+
+      - id: root
+        uses: ./
+        continue-on-error: true
+        env:
+          FAKE_FAIL_TIMES: "9"
+          FAKE_STATE: ${{ runner.temp }}/fake-count
+        with:
+          cloudflare-api-token: fake-token-for-smoke
+          cloudflare-account-id: fake-account
+          wrangler-command: node test/helpers/fake-wrangler.mjs
+          retries: "2"
+          retry-delay: "0"
+          comment: "false"
+          deployment: "false"
+      - name: a failed upload fails the root action, after recording the outcome
+        env:
+          OUTCOME: ${{ steps.root.outputs.outcome }}
+          STEP: ${{ steps.root.outcome }}
+        run: |
+          test "$OUTCOME" = failure
+          test "$STEP" = failure
+
+      - id: deploy
+        uses: ./deploy
+        env:
+          FAKE_NDJSON: ${{ github.workspace }}/test/fixtures/output-deploy.ndjson
+        with:
+          cloudflare-api-token: fake-token-for-smoke
+          cloudflare-account-id: fake-account
+          wrangler-command: node test/helpers/fake-wrangler.mjs
+      - name: deploy outputs
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: test "$URL" = https://www.example.com

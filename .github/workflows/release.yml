@@ -1,0 +1,45 @@
+name: Release
+
+# release-please keeps a release PR open from Conventional Commits. Merging it tags
+# vX.Y.Z and creates the GitHub Release; this workflow then moves the major tag
+# (v1) to the same commit, which is what `uses: Wave-RF/cloudflare-preview@v1`
+# resolves. See RELEASING.md.
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # release commit, tags, GitHub Release
+      pull-requests: write # the release PR
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - if: ${{ steps.release.outputs.release_created }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Move the major tag
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          MAJOR: ${{ steps.release.outputs.major }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          case "$MAJOR" in ''|*[!0-9]*) echo "::error::unexpected major '$MAJOR'"; exit 1 ;; esac
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f -a "v$MAJOR" -m "v$MAJOR → $TAG" "$TAG^{commit}"
+          git push -f origin "refs/tags/v$MAJOR"
