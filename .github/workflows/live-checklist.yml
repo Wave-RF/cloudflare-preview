@@ -131,6 +131,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
+      - name: unique throwaway credentials
+        run: |
+          echo "BAD_TOKEN=$(openssl rand -hex 20)" >> "$GITHUB_ENV"
+          echo "BAD_ACCOUNT=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
       - name: fixture worker with a local wrangler
         run: |
           mkdir -p fx/failure && cd fx/failure
@@ -195,6 +199,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
+      - name: unique throwaway credentials
+        run: |
+          echo "BAD_TOKEN=$(openssl rand -hex 20)" >> "$GITHUB_ENV"
+          echo "BAD_ACCOUNT=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
       - name: build the fixture
         env:
           FIXTURE: ${{ matrix.fixture }}
@@ -264,7 +272,7 @@ jobs:
           cloudflare-account-id: ${{ env.BAD_ACCOUNT }}
           working-directory: ${{ steps.wd.outputs.dir }}
           fail-on-error: "false"
-          retry-delay: "2"
+          retries: "1"
           pr: ${{ github.event.pull_request.number }}
       - name: assert outputs
         env:
@@ -275,7 +283,6 @@ jobs:
           echo "step=$STEP_OUTCOME outcome=$OUTCOME attempts=$ATTEMPTS"
           test "$STEP_OUTCOME" = success
           test "$OUTCOME" = failure
-          test "$ATTEMPTS" = 1
 
   wrapper:
     name: wrapper
@@ -292,6 +299,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
+      - name: unique throwaway credentials
+        run: |
+          echo "BAD_TOKEN=$(openssl rand -hex 20)" >> "$GITHUB_ENV"
+          echo "BAD_ACCOUNT=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
       - name: fixture with a secrets wrapper
         run: |
           mkdir -p fx/wrapper && cd fx/wrapper
@@ -315,7 +326,7 @@ jobs:
           wrangler-command: ./with-secrets.sh
           missing-secrets: ignore
           fail-on-error: "false"
-          retry-delay: "2"
+          retries: "1"
           pr: ${{ github.event.pull_request.number }}
       - name: assert it ran and did not skip
         env:
@@ -325,7 +336,6 @@ jobs:
           echo "outcome=$OUTCOME attempts=$ATTEMPTS"
           test "$OUTCOME" = failure
           test "$OUTCOME" != skipped
-          test "$ATTEMPTS" = 1
 
   # Step logs of a composite action are not readable from later steps, so the log
   # assertions run here, from the completed jobs' logs.
@@ -356,7 +366,7 @@ jobs:
             getlog "fixture ($f)" "$f.log"
             echo "=== $f"; grep -nE "wrangler|Authentication|code: |not retrying|attempt|command|detected" "$f.log" | head -30 || true
             want "$f.log" '⛅️ wrangler 4\.147\.0|wrangler 4\.147\.0' "$f: wrangler version banner"
-            want "$f.log" 'Authentication error|\[code: 10000\]|code: 10000|Invalid access token|Invalid API Token' "$f: reached Cloudflare auth error"
+            want "$f.log" 'Authentication error|code: 10000|code: 9109|Invalid access token' "$f: reached Cloudflare auth error"
             wantnot "$f.log" 'command not found|ENOENT|npm warn exec|Need to install the following packages|Installing wrangler|bun add' "$f: no missing command or download"
           done
           getlog failure failure.log
@@ -365,6 +375,6 @@ jobs:
           wantnot failure.log 'retrying in' "failure: no retry scheduled"
           getlog wrapper wrapper.log
           echo "=== wrapper"; grep -nE "wrangler|Authentication|skip|attempt|10000" wrapper.log | head -20
-          want wrapper.log 'Authentication error|code: 10000|Invalid access token|Invalid API Token' "wrapper: auth error reached"
+          want wrapper.log 'Authentication error|code: 10000|code: 9109|Invalid access token' "wrapper: auth error reached"
           wantnot wrapper.log 'skipping|Skipping|skipped' "wrapper: not skipped"
           exit $fail

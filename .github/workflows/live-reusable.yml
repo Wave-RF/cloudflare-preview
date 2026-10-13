@@ -7,7 +7,19 @@ on:
 permissions: {}
 
 jobs:
+  creds:
+    runs-on: ubuntu-latest
+    outputs:
+      token: ${{ steps.c.outputs.token }}
+      account: ${{ steps.c.outputs.account }}
+    steps:
+      - id: c
+        run: |
+          echo "token=$(openssl rand -hex 20)" >> "$GITHUB_OUTPUT"
+          echo "account=$(openssl rand -hex 16)" >> "$GITHUB_OUTPUT"
+
   untrusted:
+    needs: creds
     uses: ./.github/workflows/live-preview-sha.yml
     permissions:
       contents: read
@@ -21,10 +33,11 @@ jobs:
       retries: "1"
       delete-closed-deployments: true
     secrets:
-      CLOUDFLARE_API_TOKEN: abcdefghijklmnopqrstuvwxyz0123456789ABCD
-      CLOUDFLARE_ACCOUNT_ID: "00000000000000000000000000000000"
+      CLOUDFLARE_API_TOKEN: ${{ needs.creds.outputs.token }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ needs.creds.outputs.account }}
 
   trusted:
+    needs: creds
     uses: ./.github/workflows/live-preview-sha.yml
     permissions:
       contents: read
@@ -39,11 +52,12 @@ jobs:
       trusted-checkout: true
       delete-closed-deployments: true
     secrets:
-      CLOUDFLARE_API_TOKEN: abcdefghijklmnopqrstuvwxyz0123456789ABCD
-      CLOUDFLARE_ACCOUNT_ID: "00000000000000000000000000000000"
+      CLOUDFLARE_API_TOKEN: ${{ needs.creds.outputs.token }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ needs.creds.outputs.account }}
 
   # (a) the workflow exactly as shipped, with its @v1 tag refs.
   as-shipped:
+    needs: creds
     uses: ./.github/workflows/preview.yml
     permissions:
       contents: read
@@ -56,8 +70,8 @@ jobs:
       label: shipped
       retries: "1"
     secrets:
-      CLOUDFLARE_API_TOKEN: abcdefghijklmnopqrstuvwxyz0123456789ABCD
-      CLOUDFLARE_ACCOUNT_ID: "00000000000000000000000000000000"
+      CLOUDFLARE_API_TOKEN: ${{ needs.creds.outputs.token }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ needs.creds.outputs.account }}
 
   verify:
     needs: [untrusted, trusted]
@@ -80,13 +94,13 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[].name' | tee artifacts.txt
           for env in preview/untrusted preview/trusted; do
             echo "== deployments in $env"
-            gh api "repos/$GITHUB_REPOSITORY/deployments?environment=$env&per_page=100" --jq '.[] | [.id, .sha[0:7], .ref] | @tsv' | tee "dep-$env.txt" || true
+            gh api "repos/$GITHUB_REPOSITORY/deployments?environment=$env&per_page=100" --jq '.[] | [.id, .sha[0:7], .ref] | @tsv' | tee "dep-${env//\//_}.txt" || true
           done
           if [ "$ACTION" = closed ]; then
-            test ! -s dep-preview/untrusted.txt || { echo "FAIL: deployments left after close"; exit 1; }
+            test ! -s dep-preview_untrusted.txt || { echo "FAIL: deployments left after close"; exit 1; }
             echo "ok: no deployments left in preview/untrusted"
           else
             grep -q cloudflare-preview-untrusted artifacts.txt || { echo "FAIL: build artifact missing"; exit 1; }
-            test -s dep-preview/untrusted.txt || { echo "FAIL: no deployment record created"; exit 1; }
+            test -s dep-preview_untrusted.txt || { echo "FAIL: no deployment record created"; exit 1; }
             echo "ok: artifact uploaded, failed deployment recorded"
           fi
