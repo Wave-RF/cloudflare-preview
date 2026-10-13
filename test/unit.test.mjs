@@ -90,8 +90,11 @@ describe("wrangler structured output", () => {
     assert.equal(d.deploy.versionId, "c0ffee00-1234-4abc-8def-0123456789ab");
     assert.deepEqual(d.deploy.targets, ["https://example-docs.example.workers.dev", "www.example.com (custom domain)"]);
     const f = parseOutputFile(`${read("output-command-failed.ndjson")}{"type":"vers`);
-    assert.equal(f.failed.code, 10000);
+    assert.equal(f.failed.code, 9109);
     assert.equal(isRetryable(f.failed), false);
+    assert.equal(isRetryable({ code: 9106 }), false);
+    assert.equal(isRetryable({ code: 10013, message: "x" }, "Authentication error [code: 10000]"), false, "stdout backstop");
+    assert.equal(isRetryable({ code: 10429, retryAfterMs: 1000 }), true, "rate limit stays retryable");
     const g = parseOutputFile(read("output-command-failed-no-code.wrangler-4.130.0.ndjson"));
     assert.equal(g.failed.code, undefined);
     assert.equal(isRetryable(g.failed), false, "a never-deployed Worker is not retryable");
@@ -210,9 +213,28 @@ describe("preview body", () => {
   it("makes untrusted text inert", () => {
     const s = inert("<img src=x onerror=alert(1)> [click](https://evil) @org/team *bold* `code`");
     assert.ok(!s.includes("<img"));
-    assert.ok(!s.includes("@"));
+    assert.ok(!/@(?!&#8203;)/.test(s), "every @ is followed by the zero-width-space entity");
     assert.ok(!/(?<!\\)\[/.test(s));
     assert.ok(!/(?<!\\)`/.test(s));
+  });
+  it("breaks @mentions with a zero-width space, not &#64; (GitHub decodes that first)", () => {
+    assert.equal(inert("thanks @org/team"), "thanks @&#8203;org/team");
+    assert.ok(!inert("@user").includes("&#64;"));
+  });
+  it("breaks scheme separators so nothing autolinks", () => {
+    assert.equal(inert("see https://example.com now"), "see https&#58;//example.com now");
+    assert.equal(inert("http://a.b and HTTPS://C.D"), "http&#58;//a.b and HTTPS&#58;//C.D");
+    assert.equal(inert("visit www.example.com"), "visit www&#46;example.com");
+    assert.equal(inert("[link](https://example.com)"), "\\[link\\]\\(https&#58;//example.com\\)");
+  });
+  it("leaves ordinary text alone", () => {
+    assert.equal(inert("Fix the cache, add 3 tests: ok? yes; done."), "Fix the cache, add 3 tests: ok? yes; done.");
+    assert.equal(inert("the www prefix and awww.x"), "the www prefix and awww.x");
+    assert.equal(inert("use http for things"), "use http for things");
+  });
+  it("renders a hostile full subject inert", () => {
+    const s = inert("fix @user [link](https://example.com) https://bare.example.com www.example.com");
+    assert.equal(s, "fix @&#8203;user \\[link\\]\\(https&#58;//example.com\\) https&#58;//bare.example.com www&#46;example.com");
   });
   it("formats time in a zone, DST-aware, UTC by default", () => {
     assert.equal(formatTime("2026-07-01T12:00:00Z"), "2026-07-01 12:00 UTC");

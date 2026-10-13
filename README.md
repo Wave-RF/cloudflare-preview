@@ -120,6 +120,7 @@ It walks up from `working-directory` to the repository root. The first directory
 - **Override:** set `wrangler-command` to anything. It is split like a shell would split it, but never run through a shell, so it can't expand variables or run substitutions. Examples:
   - `wrangler-command: pnpm --filter site exec wrangler`
   - `wrangler-command: ./scripts/with-secrets.sh pnpm exec wrangler`, for a wrapper that injects credentials. Pair it with `missing-secrets: ignore`.
+- **Yarn 1 in a pnpm monorepo:** if the root `package.json` has `packageManager: pnpm@…`, a Yarn 1 sub-project needs its own `packageManager: yarn@1.x` field, or yarn 1 refuses to run.
 - **Windows runners:** the auto-detected commands are untested there (`pnpm`, `yarn` and `bunx` are `.cmd` shims). Set `wrangler-command: node node_modules/wrangler/bin/wrangler.js`.
 
 ## The pieces
@@ -198,7 +199,7 @@ Production has no PR to close, so nothing would ever retire an old production re
 - **No injection paths:**
   - There is no `${{ }}` inside any `run:` script; values travel through `env:`, and a test enforces it.
   - wrangler is spawned with an argument array, never through a shell, so a `$(…)` in a commit message or an input stays literal.
-  - Commit subjects and author names are HTML-escaped and markdown-escaped before they reach the comment, and `@` is neutralised so they can't ping anyone.
+  - Commit subjects and author names are HTML-escaped and markdown-escaped before they reach the comment, `@` is followed by a zero-width space (`@&#8203;`) so nobody is mentioned (an `&#64;` entity does not work, because GitHub decodes it before looking for mentions), and `http://`, `https://` and `www.` are broken with an entity so a URL in a subject renders as plain text instead of autolinking.
 - **Sticky comments are author-filtered.** Anyone can post a comment that starts with the marker. Only one written by `comment-author` (default `github-actions[bot]`) is edited, and only that comment's hidden history is read back. Every history field is re-validated.
 - **Pinning.** Third-party actions in this repo are pinned by commit SHA. `@v1` is a moving tag, so pin `Wave-RF/cloudflare-preview` by SHA if your policy requires it.
 
@@ -219,7 +220,7 @@ The action sets `WRANGLER_OUTPUT_FILE_PATH`, and wrangler appends ND-JSON there:
 
 The types are in workers-sdk's [`packages/workers-utils/src/output.ts`](https://github.com/cloudflare/workers-sdk/blob/main/packages/workers-utils/src/output.ts). If no entry is written (an older wrangler, or a wrapper that drops the variable), it falls back to wrangler's human-readable lines: `Worker Version ID:`, `Version Preview URL:` and `Version Preview Alias URL:`.
 
-Retries skip the failures a retry can't fix: an authentication error, or a Worker that has never been deployed.
+Retries skip the failures a retry can't fix: an authentication error (Cloudflare codes 10000, 9106, 9109 and 6111, or `[code: 10000]` anywhere in wrangler's output), or a Worker that has never been deployed. Rate limits (10429) are retried, waiting as long as wrangler's `retry_after_ms` asks.
 
 ## Reference
 
@@ -288,7 +289,7 @@ Upload + Deployment + preview comment in one step. Source: [`action.yml`](action
 | `alias` | `pr-{pr}` | --preview-alias pattern. Placeholders: {pr} {sha} {sha7} {branch} {label} {run}. Sanitised to Cloudflare's rules (lowercase, digits, dashes, starts with a letter). With no PR, {pr} falls back to the branch name. Empty → no alias. |
 | `tag` | `pr-{pr}` | --tag pattern for the version (same placeholders). Empty → omitted. |
 | `message` | `Preview of #{pr} at {sha7}` | --message pattern for the version (same placeholders). Empty → omitted. |
-| `retries` | `3` | Total attempts (1-10). Cloudflare authentication errors (code 10000) are not retried. |
+| `retries` | `3` | Total attempts (1-10). Cloudflare authentication errors (codes 10000, 9106, 9109, 6111) are not retried. |
 | `retry-delay` | `10` | Seconds between attempts (wrangler's retry_after_ms wins when larger). |
 | `fail-on-error` | `true` | Fail the step when the upload fails. `false` → outcome=failure and an error annotation only. |
 | `pr` | `""` | Pull request number. Empty → from the event. |

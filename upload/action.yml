@@ -61,7 +61,7 @@ inputs:
     required: false
     default: "Preview of #{pr} at {sha7}"
   retries:
-    description: Total attempts (1-10). Cloudflare authentication errors (code 10000) are not retried.
+    description: Total attempts (1-10). Cloudflare authentication errors (codes 10000, 9106, 9109, 6111) are not retried.
     required: false
     default: "3"
   retry-delay:
