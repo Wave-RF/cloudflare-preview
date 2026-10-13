@@ -1,0 +1,349 @@
+# TEMPORARY. Live checks for Wave-RF/cloudflare-preview#2 that need no real Cloudflare
+# credentials. Never merged. Invalid token on purpose: Cloudflare answers with an auth error.
+name: live-checklist
+on: pull_request
+
+permissions: {}
+
+env:
+  BAD_TOKEN: invalid-token-for-cfp-test
+  BAD_ACCOUNT: "00000000000000000000000000000000"
+  WRANGLER_VERSION: 4.147.0
+  CI: "true"
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  escape:
+    name: escape
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: find the commit whose subject is the test string
+        id: find
+        run: |
+          want='test: @EricAndrechek **bold** [link](https://example.com) <b>tag</b> `code` _under_ | pipe'
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" --paginate \
+            --jq '.[] | [.sha, (.commit.message | split("\n")[0])] | @tsv' \
+            | WANT="$want" awk -F'\t' 'BEGIN{w=ENVIRON["WANT"]} $2==w {print $1; exit}')
+          test -n "$sha" || { echo "no commit with the exact subject"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - id: pc
+        uses: ./preview-comment
+        with:
+          outcome: success
+          alias-url: https://pr-${{ github.event.pull_request.number }}-example.workers.dev
+          version-url: https://abcdef12-example.workers.dev
+          label: escape
+          sha: ${{ steps.find.outputs.sha }}
+          fail-on-error: "true"
+      - name: assert the raw body
+        env:
+          CID: ${{ steps.pc.outputs.comment-id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/issues/comments/$CID" --jq .body > body.md
+          echo "---- raw body"; cat body.md; echo "----"
+          grep -F '**Commit:**' body.md > commit-line.md
+          # expected inert() output of the subject, character for character
+          expected='test: &#64;EricAndrechek \*\*bold\*\* \[link\]\(https://example.com\) &lt;b&gt;tag&lt;/b&gt; \`code\` \_under\_ \| pipe'
+          grep -F -- "$expected" commit-line.md || { echo "FAIL: escaped subject not found verbatim"; exit 1; }
+          grep -F '&#64;EricAndrechek' body.md >/dev/null
+          # no bare @EricAndrechek outside the author's profile link text
+          if sed 's/\[@EricAndrechek\](https:\/\/github.com\/EricAndrechek)//g' body.md | grep -F '@EricAndrechek'; then
+            echo "FAIL: bare mention in body"; exit 1; fi
+          # nothing from the subject is raw HTML or a live link
+          if grep -E '<b>|</b>|\]\(https://example.com\)' body.md | grep -vF '\]\(https://example.com\)'; then
+            echo "FAIL: live markup from the subject"; exit 1; fi
+          if grep -F 'https://example.com' body.md | grep -vF '\(https://example.com\)'; then
+            echo "FAIL: unescaped example.com"; exit 1; fi
+      - name: assert the rendered HTML is plain text
+        env:
+          CID: ${{ steps.pc.outputs.comment-id }}
+        run: |
+          gh api -H 'Accept: application/vnd.github.html+json' "repos/$GITHUB_REPOSITORY/issues/comments/$CID" --jq .body_html > body.html
+          echo "---- rendered html"; cat body.html; echo "----"
+          python3 - <<'PY'
+          import re, html, sys
+          h = open("body.html").read()
+          # the subject sits in the Commit list item
+          m = re.search(r"<li><strong>Commit:</strong>(.*?)</li>", h, re.S)
+          assert m, "no Commit list item"
+          li = m.group(1)
+          # after the commit link, the remainder is the subject
+          tail = li.split("</a>", 1)[1]
+          print("subject html:", tail)
+          bad = [t for t in ("<b>", "<strong>", "<em>", "<code>", "<a ", "<del>", "<table") if t in tail]
+          assert not bad, f"markup in rendered subject: {bad}"
+          text = html.unescape(re.sub(r"<[^>]+>", "", tail)).strip()
+          want = "test: @EricAndrechek **bold** [link](https://example.com) <b>tag</b> `code` _under_ | pipe"
+          assert text == want, f"rendered text {text!r} != {want!r}"
+          print("rendered as plain text:", text)
+          PY
+      - name: control, a bare mention in a comment does create a mentioned event
+        run: gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body='live-checklist control: @EricAndrechek' --jq .html_url
+      - name: assert the timeline
+        run: |
+          sleep 20
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate \
+            --jq '.[] | select(.event=="mentioned") | [.event, .created_at, (.actor.login // "")] | @tsv' > mentions.tsv || true
+          echo "mentioned events (the control comment may create one):"; cat mentions.tsv
+          # the sticky comment's own time window: any mention event is attributable to the control
+          # comment only if there is exactly as many as controls; report the count for the record.
+          echo "count=$(wc -l < mentions.tsv)"
+          cid='${{ steps.pc.outputs.comment-id }}'
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate \
+            --jq '.[] | select(.event=="commented") | select(.id=='"$cid"') | .id' | grep -q "$cid"
+
+  failure:
+    name: failure
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+      deployments: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: fixture worker with a local wrangler
+        run: |
+          mkdir -p fx/failure && cd fx/failure
+          echo '{"name":"cfp-live-failure","private":true}' > package.json
+          echo '{"name":"cfp-live-failure","main":"index.js","compatibility_date":"2026-01-01","preview_urls":true}' > wrangler.jsonc
+          echo 'export default { fetch: () => new Response("hi") };' > index.js
+          npm install --save-dev --no-audit --no-fund "wrangler@$WRANGLER_VERSION"
+      - id: root
+        uses: ./
+        continue-on-error: true
+        with:
+          cloudflare-api-token: ${{ env.BAD_TOKEN }}
+          cloudflare-account-id: ${{ env.BAD_ACCOUNT }}
+          working-directory: fx/failure
+          wrangler-command: ${{ github.workspace }}/fx/failure/node_modules/.bin/wrangler
+          label: failure
+          retry-delay: "2"
+      - name: assert the failure path
+        env:
+          STEP_OUTCOME: ${{ steps.root.outcome }}
+          ACTION_OUTCOME: ${{ steps.root.outputs.outcome }}
+          DEP_ID: ${{ steps.root.outputs.deployment-id }}
+          COMMENT_URL: ${{ steps.root.outputs.comment-url }}
+        run: |
+          test "$STEP_OUTCOME" = failure || { echo "FAIL: step outcome $STEP_OUTCOME"; exit 1; }
+          test "$ACTION_OUTCOME" = failure || { echo "FAIL: action outcome '$ACTION_OUTCOME'"; exit 1; }
+          test -n "$DEP_ID"
+          echo "deployment $DEP_ID" ; echo "$DEP_ID" > dep-id.txt
+          gh api "repos/$GITHUB_REPOSITORY/deployments/$DEP_ID/statuses" --jq '.[0] | {state, description}' | tee st.json
+          jq -e '.state=="failure" or .state=="error"' st.json
+          cid="${COMMENT_URL##*issuecomment-}"
+          gh api "repos/$GITHUB_REPOSITORY/issues/comments/$cid" --jq .body | tee body.md
+          grep -qi 'fail' body.md
+          grep -qE '1 attempt' body.md || { echo "FAIL: comment does not say 1 attempt"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/deployments?sha=${{ github.event.pull_request.head.sha }}" --jq '.[] | [.id, .environment] | @tsv'
+
+  detect:
+    name: fixture (${{ matrix.fixture }})
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [pnpm-workspace, yarn-classic, yarn-berry-pnp, bun, npm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: build the fixture
+        env:
+          FIXTURE: ${{ matrix.fixture }}
+        run: |
+          set -euxo pipefail
+          root="$GITHUB_WORKSPACE/fx/$FIXTURE"
+          mkdir -p "$root"
+          worker() { # dir
+            echo '{"name":"cfp-live-detect","main":"index.js","compatibility_date":"2026-01-01","preview_urls":true}' > "$1/wrangler.jsonc"
+            echo 'export default { fetch: () => new Response("hi") };' > "$1/index.js"
+          }
+          cd "$root"
+          case "$FIXTURE" in
+            pnpm-workspace)
+              npm install -g pnpm@10.18.0
+              echo '{"name":"root","private":true}' > package.json
+              printf 'packages:\n  - "packages/*"\n' > pnpm-workspace.yaml
+              mkdir -p packages/site
+              echo "{\"name\":\"site\",\"private\":true,\"devDependencies\":{\"wrangler\":\"$WRANGLER_VERSION\"}}" > packages/site/package.json
+              worker packages/site
+              pnpm install
+              ls pnpm-lock.yaml packages/site/node_modules/.bin/wrangler ;;
+            yarn-classic)
+              yarn --version
+              echo '{"name":"yc","private":true}' > package.json
+              worker .
+              yarn add --dev "wrangler@$WRANGLER_VERSION"
+              ls yarn.lock ;;
+            yarn-berry-pnp)
+              mkdir -p "$RUNNER_TEMP/shims"
+              corepack enable --install-directory "$RUNNER_TEMP/shims"
+              echo "$RUNNER_TEMP/shims" >> "$GITHUB_PATH"
+              export PATH="$RUNNER_TEMP/shims:$PATH"
+              export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 YARN_ENABLE_IMMUTABLE_INSTALLS=false
+              echo '{"name":"yb","private":true,"packageManager":"yarn@4.9.2"}' > package.json
+              printf 'nodeLinker: pnp\n' > .yarnrc.yml
+              touch yarn.lock
+              worker .
+              yarn --version
+              yarn add --dev "wrangler@$WRANGLER_VERSION"
+              ls .pnp.cjs yarn.lock ;;
+            bun)
+              npm install -g bun@1.3.2
+              bun --version
+              echo "{\"name\":\"b\",\"private\":true,\"devDependencies\":{\"wrangler\":\"$WRANGLER_VERSION\"}}" > package.json
+              worker .
+              bun install
+              ls bun.lock node_modules/.bin/wrangler ;;
+            npm)
+              echo '{"name":"n","private":true}' > package.json
+              worker .
+              npm install --save-dev --no-audit --no-fund "wrangler@$WRANGLER_VERSION"
+              ls package-lock.json node_modules/.bin/wrangler ;;
+          esac
+      - name: working directory for the action
+        id: wd
+        env:
+          FIXTURE: ${{ matrix.fixture }}
+        run: |
+          if [ "$FIXTURE" = pnpm-workspace ]; then echo "dir=fx/$FIXTURE/packages/site" >> "$GITHUB_OUTPUT"
+          else echo "dir=fx/$FIXTURE" >> "$GITHUB_OUTPUT"; fi
+      - id: up
+        uses: ./upload
+        continue-on-error: true
+        with:
+          cloudflare-api-token: ${{ env.BAD_TOKEN }}
+          cloudflare-account-id: ${{ env.BAD_ACCOUNT }}
+          working-directory: ${{ steps.wd.outputs.dir }}
+          fail-on-error: "false"
+          retry-delay: "2"
+          pr: ${{ github.event.pull_request.number }}
+      - name: assert outputs
+        env:
+          STEP_OUTCOME: ${{ steps.up.outcome }}
+          OUTCOME: ${{ steps.up.outputs.outcome }}
+          ATTEMPTS: ${{ steps.up.outputs.attempts }}
+        run: |
+          echo "step=$STEP_OUTCOME outcome=$OUTCOME attempts=$ATTEMPTS"
+          test "$STEP_OUTCOME" = success
+          test "$OUTCOME" = failure
+          test "$ATTEMPTS" = 1
+
+  wrapper:
+    name: wrapper
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: fixture with a secrets wrapper
+        run: |
+          mkdir -p fx/wrapper && cd fx/wrapper
+          echo '{"name":"cfp-live-wrapper","private":true}' > package.json
+          echo '{"name":"cfp-live-wrapper","main":"index.js","compatibility_date":"2026-01-01","preview_urls":true}' > wrangler.jsonc
+          echo 'export default { fetch: () => new Response("hi") };' > index.js
+          npm install --save-dev --no-audit --no-fund "wrangler@$WRANGLER_VERSION"
+          cat > with-secrets.sh <<SH
+          #!/usr/bin/env bash
+          export CLOUDFLARE_API_TOKEN=$BAD_TOKEN
+          export CLOUDFLARE_ACCOUNT_ID=$BAD_ACCOUNT
+          exec "\$(dirname "\$0")/node_modules/.bin/wrangler" "\$@"
+          SH
+          chmod +x with-secrets.sh
+          cat with-secrets.sh
+      - id: up
+        uses: ./upload
+        continue-on-error: true
+        with:
+          working-directory: fx/wrapper
+          wrangler-command: ./with-secrets.sh
+          missing-secrets: ignore
+          fail-on-error: "false"
+          retry-delay: "2"
+          pr: ${{ github.event.pull_request.number }}
+      - name: assert it ran and did not skip
+        env:
+          OUTCOME: ${{ steps.up.outputs.outcome }}
+          ATTEMPTS: ${{ steps.up.outputs.attempts }}
+        run: |
+          echo "outcome=$OUTCOME attempts=$ATTEMPTS"
+          test "$OUTCOME" = failure
+          test "$OUTCOME" != skipped
+          test "$ATTEMPTS" = 1
+
+  # Step logs of a composite action are not readable from later steps, so the log
+  # assertions run here, from the completed jobs' logs.
+  logs:
+    name: log assertions
+    needs: [escape, failure, detect, wrapper]
+    if: ${{ always() && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: assert the logs
+        run: |
+          set -u
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | [.id, .name, .conclusion] | @tsv' > jobs.tsv
+          cat jobs.tsv
+          fail=0
+          getlog() { id=$(awk -F'\t' -v n="$1" '$2==n {print $1}' jobs.tsv); gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" > "$2"; }
+          want() { # file pattern desc
+            if grep -qE -- "$2" "$1"; then echo "ok   $3"; else echo "FAIL $3 (/$2/ not in $1)"; fail=1; fi; }
+          wantnot() {
+            if grep -qE -- "$2" "$1"; then echo "FAIL $3 (/$2/ found in $1)"; fail=1; else echo "ok   $3"; fi; }
+          for f in pnpm-workspace yarn-classic yarn-berry-pnp bun npm; do
+            getlog "fixture ($f)" "$f.log"
+            echo "=== $f"; grep -nE "wrangler|Authentication|code: |not retrying|attempt|command|detected" "$f.log" | head -30 || true
+            want "$f.log" '⛅️ wrangler 4\.147\.0|wrangler 4\.147\.0' "$f: wrangler version banner"
+            want "$f.log" 'Authentication error|\[code: 10000\]|code: 10000|Invalid access token|Invalid API Token' "$f: reached Cloudflare auth error"
+            wantnot "$f.log" 'command not found|ENOENT|npm warn exec|Need to install the following packages|Installing wrangler|bun add' "$f: no missing command or download"
+          done
+          getlog failure failure.log
+          echo "=== failure"; grep -nE "attempt|retry|retrying|10000|Authentication" failure.log | head
+          want failure.log 'not retrying' "failure: auth error not retried"
+          wantnot failure.log 'retrying in' "failure: no retry scheduled"
+          getlog wrapper wrapper.log
+          echo "=== wrapper"; grep -nE "wrangler|Authentication|skip|attempt|10000" wrapper.log | head -20
+          want wrapper.log 'Authentication error|code: 10000|Invalid access token|Invalid API Token' "wrapper: auth error reached"
+          wantnot wrapper.log 'skipping|Skipping|skipped' "wrapper: not skipped"
+          exit $fail
