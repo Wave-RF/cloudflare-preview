@@ -95,12 +95,23 @@ export function serializeState(state) {
   return `<!-- cloudflare-preview-state ${JSON.stringify({ v: 1, ...state })} -->`;
 }
 
-/** Fold a new upload into the previous state. A failure changes nothing that is live. */
+/**
+ * Fold a new upload into the previous state. A failure changes nothing that is live.
+ * The history lists earlier *commits*, one entry each: a re-run of a commit replaces its
+ * older version rather than adding a second row, and the newest version of each earlier
+ * commit is kept (the list is newest-first).
+ */
 export function nextState(prev, { outcome, sha, versionUrl, versionId, aliasUrl, at }, historyLimit = 10) {
   if (outcome !== "success" || !versionUrl) return prev;
   const entry = cleanEntry({ sha, versionUrl, versionId, at });
   if (!entry) return prev;
-  const older = [prev.current, ...prev.history].filter((e) => e && e.versionUrl !== entry.versionUrl);
+  const seen = new Set([entry.sha]);
+  const older = [];
+  for (const e of [prev.current, ...prev.history]) {
+    if (!e || e.versionUrl === entry.versionUrl || seen.has(e.sha)) continue;
+    seen.add(e.sha);
+    older.push(e);
+  }
   return {
     current: entry,
     aliasUrl: safeUrl(aliasUrl) || prev.aliasUrl,

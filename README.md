@@ -135,7 +135,7 @@ Every piece is a **composite action**. It runs on your runner, in your job and y
 | `…/preview-comment@v1` | The sticky preview comment. | `pull-requests: write`, `contents: read` (it reads the commit) |
 | `…/comment@v1` | A **generic** sticky comment: any body, any marker. | `pull-requests: write` on a PR; `issues: write` on an issue |
 
-About comment permissions: GitHub's [fine-grained permission table](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens) lists the issue-comment endpoints under both Issues and Pull requests, so `pull-requests: write` should be enough on a PR. If comments fail with HTTP 403, add `issues: write` and please open an issue.
+About comment permissions: on a pull request, `pull-requests: write` is enough. The comment endpoints are the issue-comment ones, but `GITHUB_TOKEN` with only `pull-requests: write` (no `issues: write`) lists, creates and edits a PR's comments. That was tested on a real PR ([#1](https://github.com/Wave-RF/cloudflare-preview/issues/1)). Use `issues: write` only when `comment` targets an issue.
 
 Every input and output of every piece is listed in the [Reference](#reference) below.
 
