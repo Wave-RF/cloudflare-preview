@@ -1,6 +1,9 @@
 name: Cloudflare preview (reusable)
 
 # A thin reusable workflow built only from this repo's composite actions:
+# LIMIT: it cannot be used in a repository that requires actions to be pinned to a full-length commit SHA
+# (it calls its own actions by @v1 and callers can't override that). Use the individual actions.
+#
 #
 #   build       checks out the PR head, installs, runs your build command and uploads
 #               the output directory as an artifact. NO Cloudflare secrets in this job.

@@ -142,6 +142,8 @@ Every input and output of every piece is listed in the [Reference](#reference) b
 
 ### The reusable workflow
 
+> **Limit:** `.github/workflows/preview.yml` cannot be used in a repository that requires actions to be pinned to a full-length commit SHA (the repo or org setting "Require actions to be pinned to a full-length commit SHA"). It calls this repo's own actions by the moving `@v1` tag, GitHub enforces the rule inside called workflows, and a caller can't override those refs. The error is "all actions must be pinned to a full-length commit SHA". In such a repository, use the individual actions pinned by SHA instead: [`examples/trusted-checkout.yml`](examples/trusted-checkout.yml) (recommended), [`examples/composite-pieces.yml`](examples/composite-pieces.yml) and [`examples/cleanup.yml`](examples/cleanup.yml).
+
 [`.github/workflows/preview.yml`](.github/workflows/preview.yml) is built only from the actions above. It has four jobs:
 
 - **build:** runs your build command, with no secrets, and uploads the output as an artifact.
@@ -201,7 +203,7 @@ Production has no PR to close, so nothing would ever retire an old production re
   - wrangler is spawned with an argument array, never through a shell, so a `$(…)` in a commit message or an input stays literal.
   - Commit subjects and author names are HTML-escaped and markdown-escaped before they reach the comment, `@` is followed by a zero-width space (`@&#8203;`) so nobody is mentioned (an `&#64;` entity does not work, because GitHub decodes it before looking for mentions), and `http://`, `https://` and `www.` are broken with an entity so a URL in a subject renders as plain text instead of autolinking.
 - **Sticky comments are author-filtered.** Anyone can post a comment that starts with the marker. Only one written by `comment-author` (default `github-actions[bot]`) is edited, and only that comment's hidden history is read back. Every history field is re-validated.
-- **Pinning.** Third-party actions in this repo are pinned by commit SHA. `@v1` is a moving tag, so pin `Wave-RF/cloudflare-preview` by SHA if your policy requires it.
+- **Pinning.** Third-party actions in this repo are pinned by commit SHA. `@v1` is a moving tag, so pin `Wave-RF/cloudflare-preview` by SHA if your policy requires it. The reusable workflow can't be pinned that way (see its limit above), so a repository that requires SHA pinning must use the individual actions.
 
 ## Limitations
 
