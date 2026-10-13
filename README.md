@@ -177,6 +177,12 @@ In practice:
 
 **3. The uploaded versions.** They stay in the Worker's version history. Cloudflare has no API to delete a version, and they don't serve production traffic unless deployed.
 
+### Production deployments
+
+Production has no PR to close, so nothing would ever retire an old production record. GitHub's own `auto_inactive` [skips production environments](https://docs.github.com/en/rest/deployments/statuses#create-a-deployment-status) (it covers only "non-transient, non-production" ones), so every deploy would stay `success` and the Deployments page would list them all as active.
+
+`deploy` with `github-deployment: true` therefore retires them itself: after a successful deploy it marks inactive every earlier deployment **this action recorded** in the same environment, leaving exactly one active. Deployments some other tool created are never touched. Set `deactivate-previous: false` to keep them. A failure while retiring only warns; it never fails a deploy that succeeded. It needs the same `deployments: write`.
+
 ## Security model
 
 - **Untrusted code never runs next to the token, if you use the trusted checkout.** In [`trusted-checkout.yml`](examples/trusted-checkout.yml), the PR's build runs with **no** Cloudflare secrets and uploads only the built output as an artifact. The job that holds the token checks out the **default branch**, so wrangler, the Worker source, the wrangler config and the lockfile all come from there. A PR's dependency change then can't execute with the token: a compromised package, a `postinstall` script, or a `build.command` in the wrangler config.
@@ -321,6 +327,7 @@ Upload + Deployment + preview comment in one step. Source: [`action.yml`](action
 | `fail-on-error` | `true` | Fail the step when the deploy fails. |
 | `github-deployment` | `false` | Record a GitHub Deployment (in_progress, then success/failure) in `environment`. |
 | `environment` | `production` | GitHub environment name for the deployment record. |
+| `deactivate-previous` | `true` | After a successful deploy, mark this action's earlier deployments in the environment inactive. GitHub's own auto_inactive skips production, so without this every production deploy stays "active". Deployments recorded by other tools are never touched. |
 | `github-token` | `${{ github.token }}` | Token for the deployment record (needs deployments write). |
 | `label` | `production` | Name used in the job summary and the {label} placeholder. |
 | `summary` | `true` | Write a job-summary section. |
@@ -350,7 +357,7 @@ A GitHub Deployment and its status; PR-close cleanup. Source: [`deployment/actio
 | `transient` | `""` | transient_environment. Empty → true unless production is true. |
 | `production` | `false` | production_environment. |
 | `delete` | `false` | With state=inactive and no deployment-id (PR closed): also DELETE the PR's deployment records after deactivating them, so the environment's history does not grow without bound. Same permission (deployments: write). |
-| `deactivate-previous` | `true` | After a success, mark this PR's earlier deployments in the environment inactive. |
+| `deactivate-previous` | `true` | After a success, mark earlier deployments in the environment inactive. For a preview, only this PR's; with production true, every deployment this action recorded there (GitHub's auto_inactive skips production). Deployments recorded by other tools are never touched. |
 | `pr` | `""` | Pull request number. Empty → from the event. |
 | `sha` | `""` | Commit to record. Empty → the PR head or GITHUB_SHA. |
 | `fail-on-error` | `false` | Fail on a GitHub API error. Default false — the record is a convenience, so a failure warns. |

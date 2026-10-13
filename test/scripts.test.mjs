@@ -324,6 +324,72 @@ describe("GitHub-facing scripts", () => {
     assert.equal(gh.state.statuses[other][0].state, "success");
   });
 
+  describe("production retirement", () => {
+    // A push to the default branch: no pull request in the event.
+    let n = 0;
+    const prod = (extra) => {
+      const sha = String(++n).padStart(40, "0");
+      return runScript("deployment.mjs", { event: { ref: "refs/heads/main", after: sha }, env: env({ GITHUB_EVENT_NAME: "push", GITHUB_SHA: sha, CFP_LABEL: "production", CFP_ENVIRONMENT: "production", CFP_PRODUCTION: "true", CFP_STATE: "success", ...extra }) });
+    };
+    const seed = (id, environment, payload, state) => {
+      gh.state.deployments.push({ id, environment, payload, ref: HEAD_SHA });
+      if (state) gh.state.statuses[id] = [{ state }];
+    };
+
+    it("a new production deploy retires only our earlier records in the same environment", async () => {
+      const first = (await prod({})).outputs["deployment-id"];
+      seed(9001, "production", { source: "other-tool" }, "success"); // foreign, other source
+      seed(9002, "production", undefined, "success"); // foreign, no payload
+      seed(9003, "production", "not json", "success"); // foreign, unparseable payload
+      seed(9004, "staging", { source: "cloudflare-preview", pr: null, label: "production" }, "success"); // other environment
+      seed(9005, "production", { source: "cloudflare-preview", pr: null, label: "production" }, "inactive"); // already inactive
+      const r = await prod({});
+      assert.equal(r.code, 0, r.stdout);
+      const second = r.outputs["deployment-id"];
+      assert.notEqual(second, first);
+      assert.equal(r.outputs.deactivated, "1");
+      assert.equal(gh.state.statuses[first][0].state, "inactive");
+      assert.equal(gh.state.statuses[first][0].description, "Superseded by a newer deploy");
+      assert.equal(gh.state.statuses[second][0].state, "success");
+      for (const id of [9001, 9002, 9003, 9004]) assert.equal(gh.state.statuses[id].length, 1, `deployment ${id} untouched`);
+      assert.equal(gh.state.statuses[9005].length, 1, "no duplicate inactive status");
+    });
+
+    it("deactivate-previous false touches nothing", async () => {
+      const a = (await prod({ CFP_ENVIRONMENT: "production-off" })).outputs["deployment-id"];
+      const r = await prod({ CFP_ENVIRONMENT: "production-off", CFP_DEACTIVATE_PREVIOUS: "false" });
+      assert.equal(r.code, 0, r.stdout);
+      assert.equal(gh.state.statuses[a].length, 1);
+      assert.equal(gh.state.statuses[a][0].state, "success");
+    });
+
+    it("a failure while retiring warns and does not fail the deploy", async () => {
+      const old = (await prod({ CFP_ENVIRONMENT: "production-warn" })).outputs["deployment-id"];
+      // Fail only the status POST on the OLD deployment, i.e. the retirement itself.
+      gh.state.failNext.push({ method: "POST", pathRe: new RegExp(`/deployments/${old}/statuses$`), status: 422 });
+      const r = await prod({ CFP_ENVIRONMENT: "production-warn" });
+      assert.equal(r.code, 0, r.stdout);
+      assert.match(r.stdout, /::warning::GitHub deployment not recorded/);
+      assert.equal(gh.state.statuses[old].length, 1, "the old record is unchanged");
+      assert.equal(gh.state.failNext.length, 0, "the injected failure was consumed by the retirement");
+    });
+
+    it("a per-PR preview rule leaves a foreign deployment in preview/<label> alone", async () => {
+      const d = (extra, event) => runScript("deployment.mjs", { event, env: env({ CFP_LABEL: "guard", ...extra }) });
+      seed(9101, "preview/guard", { source: "other-tool", pr: 31 }, "success");
+      seed(9102, "preview/guard", undefined, "success");
+      await d({ CFP_STATE: "success" }, prEvent({ number: 31 }));
+      const r = await d({ CFP_STATE: "success" }, prEvent({ number: 31, sha: "c".repeat(40) }));
+      assert.equal(r.outputs.deactivated, "1");
+      assert.equal(gh.state.statuses[9101].length, 1);
+      assert.equal(gh.state.statuses[9102].length, 1);
+      const closed = await d({ CFP_STATE: "inactive" }, prEvent({ number: 31 }));
+      assert.equal(closed.code, 0, closed.stdout);
+      assert.equal(gh.state.statuses[9101].length, 1);
+      assert.equal(gh.state.statuses[9102].length, 1);
+    });
+  });
+
   it("deployment: an API failure warns by default", async () => {
     gh.state.failNext.push({ method: "POST", pathRe: /\/deployments$/, status: 422 });
     const r = await runScript("deployment.mjs", { env: env({ CFP_STATE: "in_progress" }) });

@@ -56,7 +56,7 @@ inputs:
     required: false
     default: "false"
   deactivate-previous:
-    description: After a success, mark this PR's earlier deployments in the environment inactive.
+    description: After a success, mark earlier deployments in the environment inactive. For a preview, only this PR's; with production true, every deployment this action recorded there (GitHub's auto_inactive skips production). Deployments recorded by other tools are never touched.
     required: false
     default: "true"
   pr:
