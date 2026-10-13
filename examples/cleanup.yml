@@ -1,0 +1,44 @@
+# Retire a pull request's previews when it closes (merged or not), for repos that
+# wire the actions themselves (trusted-checkout.yml, composite-pieces.yml). The
+# reusable workflow has this built in as its `cleanup` job.
+#
+# The preview job deactivates only the same PR's older deployments on each push,
+# so without this a closed PR's last preview stays "active" on the Deployments
+# page. Here they are marked inactive, then (opt-in) deleted. Other PRs'
+# previews are untouched: deployments are matched by the PR number this action
+# recorded in their payload. Cloudflare's side is left alone: a preview alias
+# can't be deleted, and an uploaded version serves no production traffic.
+#
+# A separate workflow, so the preview workflow's jobs don't all run on `closed`.
+#
+# Why `pull_request_target` is safe here (the README warns against it for builds):
+# it runs the default branch's copy of this workflow, nothing is checked out, no
+# Cloudflare secret is in scope, and the only PR-derived input is the number, which
+# the action reads from the event payload and validates as an integer. It also
+# gives the token `deployments: write` for every PR, which a plain `pull_request`
+# run would not for a PR whose head is a fork.
+name: Preview cleanup
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  cleanup:
+    # Fork PRs get no secrets, so they never had a preview to retire.
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      deployments: write
+    steps:
+      - uses: Wave-RF/cloudflare-preview/deployment@v1 # or pin a commit SHA
+        with:
+          state: inactive
+          label: preview # the label your preview job uses; one step per label
+          delete: "true" # opt-in: also delete the records, not just deactivate them
+          # This job does nothing else, so a failed retire should red it
+          # instead of passing as a warning.
+          fail-on-error: "true"
