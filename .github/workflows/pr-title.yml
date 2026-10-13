@@ -1,7 +1,7 @@
 name: PR title
 
 # Validates the PR title against Conventional Commits; the title becomes the
-# squash-merge subject release-please parses. pull_request_target runs the BASE
+# squash-merge subject semantic-release reads. pull_request_target runs the BASE
 # repo's copy of scripts/lint-pr-title.sh; the title arrives via env, never
 # interpolated into the script.
 

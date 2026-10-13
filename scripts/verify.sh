@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The local gate: the same three checks CI runs (actionlint, shellcheck, node --test).
+# The local gate: the same checks CI runs (actionlint, shellcheck, node --test, check:release).
 # Install both linters with your package manager (Homebrew: actionlint, shellcheck).
 # CI runs actionlint via `go run` at a pinned version.
 set -euo pipefail
@@ -15,3 +15,7 @@ echo "== shellcheck"
 shellcheck scripts/*.sh
 echo "== node --test"
 node --test test/*.test.mjs
+echo "== check:release"
+# Needs the pinned release devDependencies: run `pnpm install` once.
+[ -d node_modules/semantic-release ] || { echo "verify: run 'pnpm install' first (release tooling)" >&2; exit 1; }
+node scripts/check-release-config.mjs

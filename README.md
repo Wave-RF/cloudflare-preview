@@ -1,5 +1,9 @@
 # cloudflare-preview
 
+[![CI](https://github.com/Wave-RF/cloudflare-preview/actions/workflows/ci.yml/badge.svg)](https://github.com/Wave-RF/cloudflare-preview/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Wave-RF/cloudflare-preview?sort=semver)](https://github.com/Wave-RF/cloudflare-preview/releases)
+[![semantic-release](https://img.shields.io/badge/release-semantic--release-e10079)](https://semantic-release.org)
+
 GitHub Actions for Cloudflare Worker previews built in GitHub Actions:
 
 - uploads a preview version of your Worker (`wrangler versions upload --preview-alias pr-N`) with retries;
@@ -448,7 +452,7 @@ Called with `uses: Wave-RF/cloudflare-preview/.github/workflows/preview.yml@v1`.
 
 ## Versioning
 
-[release-please](https://github.com/googleapis/release-please) cuts `vX.Y.Z` releases from Conventional Commits. After each release the major tag (`v1`) moves to the new one. See [RELEASING.md](RELEASING.md).
+Every merge to `main` that carries a releasable Conventional-Commit title (`fix:`, `feat:`, a breaking `!`) cuts a `vX.Y.Z` release with [semantic-release](https://semantic-release.org). There is no release PR. After each release the major tag (`v1`) moves to the new one, so `@v1` always tracks the latest 1.x. See [RELEASING.md](RELEASING.md).
 
 ## Contributing
 

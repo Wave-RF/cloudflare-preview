@@ -19,7 +19,7 @@ name: Cloudflare preview (reusable)
 #     push: { branches: [main] }
 #   jobs:
 #     docs:
-#       uses: Wave-RF/cloudflare-preview/.github/workflows/preview.yml@<sha> # v1.x.y
+#       uses: Wave-RF/cloudflare-preview/.github/workflows/preview.yml@<sha> # v1.x.y   (the actions it runs are @v1, see below)
 #       permissions: { contents: read, pull-requests: write, deployments: write }
 #       with: { build-command: pnpm build, working-directory: docs, label: docs }
 #       secrets:
@@ -28,6 +28,14 @@ name: Cloudflare preview (reusable)
 #
 # The caller's `permissions:` caps what these jobs can have; the jobs ask for less
 # where they can.
+#
+# This workflow runs the composite actions of THIS repo at the moving major tag
+# (`@v1`), not at its own version. A reusable workflow cannot use `./upload`: GitHub
+# resolves `./` against the runner's workspace (the caller's checkout), not against
+# the repository the workflow lives in. The tag cannot be pinned per release either,
+# because releases are cut by semantic-release, which does not commit back to the
+# protected `main`. Trade-off: a caller pinned to this workflow at a SHA or an exact
+# tag still gets whatever `v1` points at today for the actions. See RELEASING.md.
 
 on:
   workflow_call:
@@ -243,7 +251,7 @@ jobs:
           name: cloudflare-preview-${{ inputs.label }}
           path: ${{ inputs.working-directory }}/${{ inputs.output-dir }}
       - id: preview
-        uses: Wave-RF/cloudflare-preview@v1.0.0 # x-release-please-version
+        uses: Wave-RF/cloudflare-preview@v1
         with:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -303,7 +311,7 @@ jobs:
           name: cloudflare-preview-${{ inputs.label }}
           path: ${{ inputs.working-directory }}/${{ inputs.output-dir }}
       - id: deploy
-        uses: Wave-RF/cloudflare-preview/deploy@v1.0.0 # x-release-please-version
+        uses: Wave-RF/cloudflare-preview/deploy@v1
         with:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -324,7 +332,7 @@ jobs:
     permissions:
       deployments: write
     steps:
-      - uses: Wave-RF/cloudflare-preview/deployment@v1.0.0 # x-release-please-version
+      - uses: Wave-RF/cloudflare-preview/deployment@v1
         with:
           state: inactive
           delete: ${{ inputs.delete-closed-deployments }}

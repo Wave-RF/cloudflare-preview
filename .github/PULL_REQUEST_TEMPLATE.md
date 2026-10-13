@@ -1,6 +1,6 @@
 <!--
 PR title MUST be Conventional Commits (the required `pr-title` check, and the
-squash-merge subject release-please parses for the version bump):
+squash-merge subject semantic-release reads for the version bump):
   <type>(optional-scope)(optional-!): <lowercase subject, no trailing period>   (<= 72 chars)
 -->
 

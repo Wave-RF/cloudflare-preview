@@ -11,7 +11,7 @@ updates:
       actions:
         patterns: ["*"]
     ignore:
-      # preview.yml references this repo's own release; release-please moves it.
+      # preview.yml references this repo's own actions by the moving major tag (@v1).
       - dependency-name: Wave-RF/cloudflare-preview
     commit-message:
       prefix: ci
