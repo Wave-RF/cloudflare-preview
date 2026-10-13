@@ -1,9 +1,11 @@
 {
   "name": "cloudflare-preview",
+  "version": "0.0.0-development",
   "private": true,
   "description": "GitHub Actions: Cloudflare Worker preview uploads, sticky PR comments, GitHub Deployments, production deploys.",
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@11.1.3",
   "engines": {
     "node": ">=20"
   },
@@ -11,6 +13,14 @@
     "test": "node --test test/*.test.mjs",
     "lint": "actionlint .github/workflows/*.yml examples/*.yml && shellcheck scripts/*.sh",
     "verify": "bash scripts/verify.sh",
-    "reference": "node scripts/reference.mjs --write"
+    "reference": "node scripts/reference.mjs --write",
+    "check:release": "node scripts/check-release-config.mjs",
+    "release": "node scripts/release.mjs"
+  },
+  "devDependencies": {
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "conventional-changelog-conventionalcommits": "9.3.1",
+    "semantic-release": "25.0.9"
   }
 }

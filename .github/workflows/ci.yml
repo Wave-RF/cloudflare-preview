@@ -49,6 +49,27 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: node --test test/*.test.mjs
 
+  # The release tooling: the commit analyzer and notes generator with the options in
+  # .releaserc.json. A bad preset bump only fails at generateNotes, mid-release on main;
+  # catch it on the PR instead.
+  release-config:
+    name: release-config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: "11.1.3"
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm run check:release
+
   # The composite actions as GitHub runs them, with a fake wrangler: proves the
   # action.yml wiring (env names, outputs, step conditions) without Cloudflare.
   smoke:

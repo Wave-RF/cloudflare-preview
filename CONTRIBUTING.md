@@ -23,4 +23,4 @@ node --test test/*.test.mjs
 
 - **The title must be a [Conventional Commit](https://www.conventionalcommits.org/):** `<type>(scope): subject`, at most 72 characters, lowercase subject, no trailing period. Types: `feat fix docs refactor test chore ci deps build perf revert style`. A breaking change (an input removed or renamed, a default changed in a way users would notice) uses `feat!:`. Check the title with `scripts/lint-pr-title.sh "<title>"`.
 - Update the `action.yml` descriptions and the README in the same PR as the change.
-- PRs merge by **squash**. Don't hand-edit `CHANGELOG.md`; release-please writes it.
+- PRs merge by **squash**. There is no `CHANGELOG.md`: GitHub Releases carry the generated notes.
