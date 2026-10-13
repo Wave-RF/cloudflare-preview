@@ -8,7 +8,7 @@ permissions: {}
 
 jobs:
   untrusted:
-    uses: ./.github/workflows/preview.yml
+    uses: ./.github/workflows/live-preview-sha.yml
     permissions:
       contents: read
       pull-requests: write
@@ -25,7 +25,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: "00000000000000000000000000000000"
 
   trusted:
-    uses: ./.github/workflows/preview.yml
+    uses: ./.github/workflows/live-preview-sha.yml
     permissions:
       contents: read
       pull-requests: write
@@ -38,6 +38,23 @@ jobs:
       retries: "1"
       trusted-checkout: true
       delete-closed-deployments: true
+    secrets:
+      CLOUDFLARE_API_TOKEN: abcdefghijklmnopqrstuvwxyz0123456789ABCD
+      CLOUDFLARE_ACCOUNT_ID: "00000000000000000000000000000000"
+
+  # (a) the workflow exactly as shipped, with its @v1 tag refs.
+  as-shipped:
+    uses: ./.github/workflows/preview.yml
+    permissions:
+      contents: read
+      pull-requests: write
+      deployments: write
+    with:
+      build-command: pnpm build
+      working-directory: fx-site
+      install-command: pnpm install --ignore-workspace --frozen-lockfile --ignore-scripts
+      label: shipped
+      retries: "1"
     secrets:
       CLOUDFLARE_API_TOKEN: abcdefghijklmnopqrstuvwxyz0123456789ABCD
       CLOUDFLARE_ACCOUNT_ID: "00000000000000000000000000000000"

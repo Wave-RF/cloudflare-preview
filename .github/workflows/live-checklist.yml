@@ -114,7 +114,8 @@ jobs:
 
   failure:
     name: failure
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    needs: wrapper
+    if: ${{ always() && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -137,6 +138,15 @@ jobs:
           echo '{"name":"cfp-live-failure","main":"index.js","compatibility_date":"2026-01-01","preview_urls":true}' > wrangler.jsonc
           echo 'export default { fetch: () => new Response("hi") };' > index.js
           npm install --save-dev --no-audit --no-fund "wrangler@$WRANGLER_VERSION"
+      - name: diagnostic, wrangler's own output file for the auth failure
+        working-directory: fx/failure
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ env.BAD_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ env.BAD_ACCOUNT }}
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/diag.ndjson
+        run: |
+          node_modules/.bin/wrangler versions upload --preview-alias pr-diag || true
+          echo "---- ndjson"; cat "$RUNNER_TEMP/diag.ndjson"
       - id: root
         uses: ./
         continue-on-error: true
@@ -175,6 +185,7 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         fixture: [pnpm-workspace, yarn-classic, yarn-berry-pnp, bun, npm]
     steps:
@@ -268,7 +279,8 @@ jobs:
 
   wrapper:
     name: wrapper
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    needs: detect
+    if: ${{ always() && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
