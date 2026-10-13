@@ -55,7 +55,7 @@ The release tooling is pinned to **exact** versions in `devDependencies` (`seman
 - A failed release opens a **"The automated release is failing"** issue with the error; it closes itself on the next success.
 - **Failure before the tag is pushed:** fix and re-run the workflow run. Nothing was released.
 - **Failure after `vX.Y.Z` was pushed but before the GitHub Release exists:** a re-run sees "no release". Delete the tag so it is re-derived, then re-run: `git push --delete origin vX.Y.Z && gh run rerun <run-id>`.
-- **Release succeeded but the `v1` move failed:** re-run only the failed job; the step is idempotent for the same commit only if the release is re-derived, so otherwise move it by hand: `git tag -f -a v1 -m "v1" vX.Y.Z^{commit} && git push -f origin refs/tags/v1`.
+- **Release succeeded but the `v1` move failed:** don't re-run (a re-run sees "no release"). Move it by hand: `git tag -f -a v1 -m v1 vX.Y.Z^{commit} && git push -f origin refs/tags/v1`.
 - Roll back a bad release: ship a `fix:`, and, if `v1` must go back, force-move it to the previous good `vX.Y.Z` as above. Prefer fixing forward.
 
 ### Checking what the next merge would do (dry run, no writes)
