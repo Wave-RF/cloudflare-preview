@@ -1,0 +1,6 @@
+▲ [WARNING] Authentication error [code: 10000]
+
+✘ [ERROR] A request to the Cloudflare API (/accounts/abc/workers/scripts/x/versions) failed.
+
+  Authentication error [code: 10000]
+  Invalid access token [code: 9109]

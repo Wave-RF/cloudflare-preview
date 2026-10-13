@@ -130,13 +130,25 @@ export function productionUrl(targets) {
   return clean.find((t) => /^https:\/\/[A-Za-z0-9.-]+\.workers\.dev$/.test(t)) || "";
 }
 
-/** Cloudflare error codes that no retry will fix. 10000 = authentication error. */
-const NOT_RETRYABLE = new Set([10000]);
+/**
+ * Cloudflare error codes that no retry will fix: bad or missing credentials.
+ *   10000  Authentication error
+ *   9106   Missing Authorization header (Cloudflare API error codes)
+ *   9109   Invalid access token (Cloudflare API error codes)
+ *   6111   Invalid format for Authorization header (observed with a malformed token)
+ * wrangler 4.147.0 prints "Authentication error [code: 10000]" then "Invalid access token
+ * [code: 9109]", and its output-file entry carries 9109, so the stdout backstop below
+ * also looks for 10000. Rate limits (10429) stay retryable.
+ */
+const NOT_RETRYABLE = new Set([10000, 9106, 9109, 6111]);
 // Failures wrangler reports with no code that are just as deterministic.
 const NOT_RETRYABLE_MESSAGE = [/cannot upload a new version of a Worker that does not yet exist/i];
 
-export const isRetryable = (failed) =>
-  !failed || !((failed.code !== undefined && NOT_RETRYABLE.has(failed.code)) || NOT_RETRYABLE_MESSAGE.some((re) => re.test(failed.message || "")));
+export const isRetryable = (failed, stdout = "") =>
+  !(
+    /\[code: 10000\]/.test(stdout) ||
+    (failed && ((failed.code !== undefined && NOT_RETRYABLE.has(failed.code)) || NOT_RETRYABLE_MESSAGE.some((re) => re.test(failed.message || ""))))
+  );
 
 /**
  * Run `argv` up to `attempts` times. Output streams through to our stdout as it comes
@@ -170,7 +182,7 @@ export async function runWithRetries(argv, { attempts = 3, delayMs = 10_000, cwd
       last = { ok: code === 0, attempts: attempt, stdout, output: parseOutputFile(text) };
       if (last.ok) return last;
       const failed = last.output.failed;
-      if (!isRetryable(failed)) {
+      if (!isRetryable(failed, last.stdout)) {
         log("::warning::wrangler failed in a way a retry cannot fix (an authentication error, or a Worker that has never been deployed); not retrying.");
         return last;
       }

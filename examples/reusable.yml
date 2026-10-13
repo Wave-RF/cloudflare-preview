@@ -1,5 +1,7 @@
 # Calling the reusable workflow: build, preview, production deploy and PR-close
 # cleanup, with no steps of your own.
+# Limit: this cannot be used in a repository that requires actions to be pinned to a full-length commit SHA;
+# in such a repository use examples/trusted-checkout.yml instead.
 name: Site
 
 on:

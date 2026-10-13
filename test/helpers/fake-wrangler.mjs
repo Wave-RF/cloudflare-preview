@@ -4,6 +4,7 @@
 //   FAKE_NDJSON        fixture file appended to WRANGLER_OUTPUT_FILE_PATH (unless FAKE_IGNORE_OUTPUT_FILE)
 //   FAKE_FAIL_TIMES    fail (exit 1) this many times first, counting in FAKE_STATE
 //   FAKE_FAIL_NDJSON   fixture appended on a failing attempt
+//   FAKE_FAIL_STDOUT   fixture printed to stdout on a failing attempt
 //   FAKE_ARGV_LOG      every invocation's argv appended here as one JSON line
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -17,6 +18,7 @@ if (env.FAKE_STATE) writeFileSync(env.FAKE_STATE, String(count + 1));
 const out = env.WRANGLER_OUTPUT_FILE_PATH;
 if (count < Number(env.FAKE_FAIL_TIMES || 0)) {
   if (out && env.FAKE_FAIL_NDJSON) appendFileSync(out, readFileSync(env.FAKE_FAIL_NDJSON, "utf8"));
+  if (env.FAKE_FAIL_STDOUT) process.stdout.write(readFileSync(env.FAKE_FAIL_STDOUT, "utf8"));
   process.stderr.write("✘ [ERROR] A request to the Cloudflare API failed.\n");
   process.exit(1);
 }

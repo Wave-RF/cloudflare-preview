@@ -15,8 +15,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /**
  * Make untrusted text (commit subjects, names) inert in GitHub markdown: HTML is
  * escaped, markdown punctuation is backslash-escaped (no links, images, tables or
- * emphasis), control characters become spaces, and @ becomes an entity so a subject
- * like "thanks @org/everyone" renders as text and pings nobody.
+ * emphasis), control characters become spaces, and @ is followed by a zero-width-space
+ * entity so "thanks @org/everyone" renders as text and pings nobody. (&#64; does NOT
+ * work: GitHub decodes the entity before it looks for mentions.) Scheme separators
+ * (http://, https://) and a leading "www." are broken with an entity so GitHub's
+ * extended autolink has nothing to link. Measured live: @&#8203; and https&#58;// work;
+ * the www&#46; form is the same mechanism but has not been measured.
  */
 export function inert(text, max = 200) {
   let s = String(text ?? "").replace(/[\u0000-\u001f\u007f]/g, " ");
@@ -26,7 +30,9 @@ export function inert(text, max = 200) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/([\\`*_[\]()#+!|~])/g, "\\$1")
-    .replace(/@/g, "&#64;");
+    .replace(/@/g, "@&#8203;")
+    .replace(/\b(https?):\/\//gi, "$1&#58;//")
+    .replace(/\bwww\./gi, (m) => `${m.slice(0, 3)}&#46;`);
 }
 
 const safeUrl = (u) => (typeof u === "string" && HTTPS.test(u) ? u : "");

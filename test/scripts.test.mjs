@@ -110,6 +110,30 @@ describe("upload", () => {
     assert.match(r.stdout, /::error::wrangler versions upload failed after 1 attempt\(s\) \(A request to the Cloudflare API/);
   });
 
+  const failing = (ndjson, stdout) =>
+    base({ FAKE_FAIL_TIMES: "9", FAKE_STATE: "count", FAKE_FAIL_NDJSON: fixture(ndjson), ...(stdout ? { FAKE_FAIL_STDOUT: fixture(stdout) } : {}) });
+
+  it("does not retry 9109 (wrangler 4.147.0 reports it in place of 10000)", async () => {
+    const r = await runScript("upload.mjs", { env: failing("output-command-failed.ndjson", "stdout-auth-failed.wrangler-4.147.0.txt") });
+    assert.equal(r.code, 1);
+    assert.equal(r.outputs.attempts, "1");
+  });
+
+  it("does not retry 9106", async () => {
+    const r = await runScript("upload.mjs", { env: failing("output-command-failed-9106.ndjson") });
+    assert.equal(r.outputs.attempts, "1");
+  });
+
+  it("does not retry when [code: 10000] appears only on stdout", async () => {
+    const r = await runScript("upload.mjs", { env: failing("output-command-failed-auth-in-stdout-only.ndjson", "stdout-auth-failed.wrangler-4.147.0.txt") });
+    assert.equal(r.outputs.attempts, "1");
+  });
+
+  it("still retries a rate limit (10429)", async () => {
+    const r = await runScript("upload.mjs", { env: failing("output-command-failed-rate-limit.ndjson") });
+    assert.equal(r.outputs.attempts, "3");
+  });
+
   it("records failure without failing when fail-on-error is false", async () => {
     const r = await runScript("upload.mjs", { env: base({ FAKE_FAIL_TIMES: "9", FAKE_STATE: "count", CFP_RETRIES: "2", CFP_FAIL_ON_ERROR: "false" }) });
     assert.equal(r.code, 0);
