@@ -1,0 +1,13 @@
+# pnpm config. pnpm 11 reads its settings from here even for a single-package
+# repo (the filename is historical: this is NOT a multi-package workspace decl).
+# The only installs are the release devDependencies (see package.json).
+
+# Supply-chain defense: a newly published dependency version can't be installed
+# for 7 days (10080 minutes), so a compromised release is usually caught and
+# pulled before it reaches CI or a publish. Our own scopes are exempt, so a
+# fresh @wave-rf / @wavehouse release is usable immediately. Same policy as
+# Wave-RF/WaveHouse.
+minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  - "@wave-rf/*"
+  - "@wavehouse/*"

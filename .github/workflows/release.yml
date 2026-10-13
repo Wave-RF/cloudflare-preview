@@ -47,8 +47,9 @@ jobs:
         with:
           node-version: "24"
 
-      # No committed lockfile; the release tooling is pinned to exact versions in package.json.
-      - run: pnpm install --no-frozen-lockfile
+      # Build the release from the committed pnpm-lock.yaml: the tree CI tested. The release
+      # tooling is also pinned to exact versions in package.json.
+      - run: pnpm install --frozen-lockfile
 
       # A red main never releases. (Linting runs in ci.yml, which has actionlint.)
       - run: node --test test/*.test.mjs

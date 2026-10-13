@@ -5,4 +5,3 @@ tmp/
 .worktrees/
 .claude/settings.local.json
 .claude/worktrees/
-pnpm-lock.yaml
