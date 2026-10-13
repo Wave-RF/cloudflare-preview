@@ -100,3 +100,18 @@ gh release view v1.x.y
 
 - **A merge didn't release.** Expected if its title was `deps`/`ci`/`chore`/`docs`/`test`/`refactor`/`build`/`style`. The run log says "no releasable commits". Retitle future PRs, or merge a `fix:`.
 - **Release notes show the wrong range.** semantic-release uses the latest `vX.Y.Z` tag reachable from `main`. Don't hand-create `vX.Y.Z` tags (the moving `v1` is ignored: it isn't valid semver).
+
+## A merge that didn't release
+
+GitHub starts no workflow for a push made with the built-in `GITHUB_TOKEN`, and Dependabot's auto-merge (enabled by `dependabot-automerge.yml` with that token) is such a push. So:
+
+- an auto-merged Dependabot PR runs no release job (harmless on its own: `deps:`/`ci:` never release), and
+- if it lands while the release job for an earlier `fix:`/`feat:` merge is starting, that job logs **"The local branch main is behind the remote one, therefore a new version won't be published"** and exits green — and no later run comes to pick the commit up.
+
+Either way, run the release by hand from `main`:
+
+```bash
+gh workflow run release.yml -R Wave-RF/cloudflare-preview --ref main
+```
+
+It is safe to run any time: semantic-release re-reads every commit since the last `vX.Y.Z` tag and releases only if one of them warrants it.
