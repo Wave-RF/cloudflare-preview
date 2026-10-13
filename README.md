@@ -75,6 +75,7 @@ More complete workflows are in [`examples/`](examples/):
 | [`trusted-checkout.yml`](examples/trusted-checkout.yml) | **Recommended when the token matters.** The build runs the PR's code without secrets. The job that holds the token runs only default-branch code. Includes the production deploy. |
 | [`composite-pieces.yml`](examples/composite-pieces.yml) | The pieces wired separately: secrets injected by a wrapper script, a mock build mode, two apps on one PR, and a custom comment template. |
 | [`reusable.yml`](examples/reusable.yml) | Calling the reusable workflow: build, preview, production and cleanup with no steps of your own. |
+| [`cleanup.yml`](examples/cleanup.yml) | Retiring a closed PR's previews, for repos that wire the actions themselves (the reusable workflow does it already). |
 | [`sticky-comment.yml`](examples/sticky-comment.yml) | The comment action for something that is not a preview. |
 
 ## The two URLs
@@ -155,7 +156,7 @@ Each preview leaves three things behind. Here is what happens to each.
 
 **1. The GitHub Deployment records.** Previews use one environment per label (`preview/<label>`), not one per PR. One per PR would leave a new environment on the repo's Environments page for every PR ever opened.
 
-- **Default: deactivate.** `deployment` with `state: inactive` marks every deployment of the closed PR inactive. GitHub shows a transient environment that has gone inactive as destroyed. The reusable workflow's `cleanup` job does this.
+- **Default: deactivate.** `deployment` with `state: inactive` marks every deployment of the closed PR inactive. GitHub shows a transient environment that has gone inactive as destroyed. The reusable workflow's `cleanup` job does this. If you wire the actions yourself, add [`examples/cleanup.yml`](examples/cleanup.yml): a separate workflow on `pull_request_target: closed`, so your preview workflow's jobs don't all run on close.
 - **Opt-in: delete.** Add `delete: true` (reusable workflow: `delete-closed-deployments: true`) to also **delete** the PR's deployment records, so the environment's history doesn't grow without bound.
   - Deletion needs the same `deployments: write`.
   - Records are always deactivated first, because [GitHub only deletes an inactive deployment](https://docs.github.com/en/rest/deployments/deployments#delete-a-deployment) when the repo has more than one.
@@ -181,7 +182,7 @@ In practice:
 - **Untrusted code never runs next to the token, if you use the trusted checkout.** In [`trusted-checkout.yml`](examples/trusted-checkout.yml), the PR's build runs with **no** Cloudflare secrets and uploads only the built output as an artifact. The job that holds the token checks out the **default branch**, so wrangler, the Worker source, the wrangler config and the lockfile all come from there. A PR's dependency change then can't execute with the token: a compromised package, a `postinstall` script, or a `build.command` in the wrangler config.
   - Limit: on `pull_request` the workflow file itself comes from the PR, so pair this with branch protection and a CODEOWNERS rule on `.github/`.
   - Cost: a PR's changes to the Worker or its config preview through the default branch's Worker and config, and take effect on merge.
-- **Fork PRs and Dependabot** get no repository secrets. The actions warn and skip when the token is empty (`missing-secrets: skip`), and the examples and the reusable workflow skip those runs outright. Never use `pull_request_target` to give a fork PR's build your token.
+- **Fork PRs and Dependabot** get no repository secrets. The actions warn and skip when the token is empty (`missing-secrets: skip`), and the examples and the reusable workflow skip those runs outright. Never use `pull_request_target` to give a fork PR's build your token. The one place the examples use it is [`cleanup.yml`](examples/cleanup.yml), which checks nothing out, holds no Cloudflare secret, and reads only the PR number from the event.
 - **Redaction before posting.** Every comment body is checked in this order:
   1. The tokens the action holds are masked as exact values.
   2. Known credential formats are masked: GitHub, AWS, Slack, JWT and PEM private keys.
