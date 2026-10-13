@@ -6,7 +6,7 @@ on: pull_request
 permissions: {}
 
 env:
-  BAD_TOKEN: invalid-token-for-cfp-test
+  BAD_TOKEN: abcdefghijklmnopqrstuvwxyz0123456789ABCD
   BAD_ACCOUNT: "00000000000000000000000000000000"
   WRANGLER_VERSION: 4.147.0
   CI: "true"
@@ -66,6 +66,7 @@ jobs:
           if grep -F 'https://example.com' body.md | grep -vF '\(https://example.com\)'; then
             echo "FAIL: unescaped example.com"; exit 1; fi
       - name: assert the rendered HTML is plain text
+        if: ${{ !cancelled() }}
         env:
           CID: ${{ steps.pc.outputs.comment-id }}
         run: |
@@ -89,20 +90,27 @@ jobs:
           print("rendered as plain text:", text)
           PY
       - name: control, a bare mention in a comment does create a mentioned event
+        if: ${{ !cancelled() }}
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body='live-checklist control: @EricAndrechek' --jq .html_url
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body='live-checklist control: @EricAndrechek' --jq '.id' > control-id.txt
+          cat control-id.txt
       - name: assert the timeline
+        if: ${{ !cancelled() }}
+        env:
+          CID: ${{ steps.pc.outputs.comment-id }}
         run: |
           sleep 20
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate \
-            --jq '.[] | select(.event=="mentioned") | [.event, .created_at, (.actor.login // "")] | @tsv' > mentions.tsv || true
-          echo "mentioned events (the control comment may create one):"; cat mentions.tsv
-          # the sticky comment's own time window: any mention event is attributable to the control
-          # comment only if there is exactly as many as controls; report the count for the record.
-          echo "count=$(wc -l < mentions.tsv)"
-          cid='${{ steps.pc.outputs.comment-id }}'
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate \
-            --jq '.[] | select(.event=="commented") | select(.id=='"$cid"') | .id' | grep -q "$cid"
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/timeline" --paginate > tl.json
+          jq -r '.[] | select(.event=="mentioned" or .event=="commented") | [.event, (.id|tostring), (.actor.login // .user.login // ""), (.created_at // "")] | @tsv' tl.json
+          sticky=$(jq -r --argjson id "$CID" '.[] | select(.event=="commented" and .id==$id) | .created_at' tl.json)
+          control=$(jq -r --argjson id "$(cat control-id.txt)" '.[] | select(.event=="commented" and .id==$id) | .created_at' tl.json)
+          echo "sticky=$sticky control=$control"
+          # mentioned events at or after the sticky comment and before the control comment
+          between=$(jq -r --arg a "$sticky" --arg b "$control" '[.[] | select(.event=="mentioned" and .created_at>=$a and .created_at<$b)] | length' tl.json)
+          after=$(jq -r --arg b "$control" '[.[] | select(.event=="mentioned" and .created_at>=$b)] | length' tl.json)
+          echo "mentioned events caused by the sticky comment: $between; by the control comment: $after"
+          test "$after" -ge 1 || echo "NOTE: control produced no event, so this test cannot discriminate"
+          test "$between" = 0 || { echo "FAIL: sticky comment created a mentioned event"; exit 1; }
 
   failure:
     name: failure
@@ -155,7 +163,7 @@ jobs:
           cid="${COMMENT_URL##*issuecomment-}"
           gh api "repos/$GITHUB_REPOSITORY/issues/comments/$cid" --jq .body | tee body.md
           grep -qi 'fail' body.md
-          grep -qE '1 attempt' body.md || { echo "FAIL: comment does not say 1 attempt"; exit 1; }
+          grep -qE ' 1 attempt' body.md || { echo "FAIL: comment does not say 1 attempt"; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/deployments?sha=${{ github.event.pull_request.head.sha }}" --jq '.[] | [.id, .environment] | @tsv'
 
   detect:
@@ -200,7 +208,7 @@ jobs:
               ls pnpm-lock.yaml packages/site/node_modules/.bin/wrangler ;;
             yarn-classic)
               yarn --version
-              echo '{"name":"yc","private":true}' > package.json
+              echo '{"name":"yc","private":true,"packageManager":"yarn@1.22.22"}' > package.json
               worker .
               yarn add --dev "wrangler@$WRANGLER_VERSION"
               ls yarn.lock ;;
@@ -327,7 +335,7 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | [.id, .name, .conclusion] | @tsv' > jobs.tsv
           cat jobs.tsv
           fail=0
-          getlog() { id=$(awk -F'\t' -v n="$1" '$2==n {print $1}' jobs.tsv); gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" > "$2"; }
+          getlog() { id=$(awk -F'\t' -v n="$1" '$2==n {print $1}' jobs.tsv); gh api --allow-escape-sequences "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" > "$2"; }
           want() { # file pattern desc
             if grep -qE -- "$2" "$1"; then echo "ok   $3"; else echo "FAIL $3 (/$2/ not in $1)"; fail=1; fi; }
           wantnot() {

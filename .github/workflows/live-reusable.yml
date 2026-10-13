@@ -1,0 +1,75 @@
+# TEMPORARY. Live check of the reusable workflow (checklist item 5). Never merged.
+name: live-reusable
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions: {}
+
+jobs:
+  untrusted:
+    uses: ./.github/workflows/preview.yml
+    permissions:
+      contents: read
+      pull-requests: write
+      deployments: write
+    with:
+      build-command: pnpm build
+      working-directory: fx-site
+      install-command: pnpm install --ignore-workspace --frozen-lockfile --ignore-scripts
+      label: untrusted
+      retries: "1"
+      delete-closed-deployments: true
+    secrets:
+      CLOUDFLARE_API_TOKEN: abcdefghijklmnopqrstuvwxyz0123456789ABCD
+      CLOUDFLARE_ACCOUNT_ID: "00000000000000000000000000000000"
+
+  trusted:
+    uses: ./.github/workflows/preview.yml
+    permissions:
+      contents: read
+      pull-requests: write
+      deployments: write
+    with:
+      build-command: pnpm build
+      working-directory: fx-site
+      install-command: pnpm install --ignore-workspace --frozen-lockfile --ignore-scripts
+      label: trusted
+      retries: "1"
+      trusted-checkout: true
+      delete-closed-deployments: true
+    secrets:
+      CLOUDFLARE_API_TOKEN: abcdefghijklmnopqrstuvwxyz0123456789ABCD
+      CLOUDFLARE_ACCOUNT_ID: "00000000000000000000000000000000"
+
+  verify:
+    needs: [untrusted, trusted]
+    if: ${{ always() && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      deployments: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ACTION: ${{ github.event.action }}
+      RESULTS: ${{ toJSON(needs) }}
+    steps:
+      - name: report
+        run: |
+          echo "event action: $ACTION"; echo "$RESULTS" | jq -c 'map_values(.result)'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | [.id, .name, .conclusion] | @tsv' | tee jobs.tsv
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[].name' | tee artifacts.txt
+          for env in preview/untrusted preview/trusted; do
+            echo "== deployments in $env"
+            gh api "repos/$GITHUB_REPOSITORY/deployments?environment=$env&per_page=100" --jq '.[] | [.id, .sha[0:7], .ref] | @tsv' | tee "dep-$env.txt" || true
+          done
+          if [ "$ACTION" = closed ]; then
+            test ! -s dep-preview/untrusted.txt || { echo "FAIL: deployments left after close"; exit 1; }
+            echo "ok: no deployments left in preview/untrusted"
+          else
+            grep -q cloudflare-preview-untrusted artifacts.txt || { echo "FAIL: build artifact missing"; exit 1; }
+            test -s dep-preview/untrusted.txt || { echo "FAIL: no deployment record created"; exit 1; }
+            echo "ok: artifact uploaded, failed deployment recorded"
+          fi

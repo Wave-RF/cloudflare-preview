@@ -1,0 +1,10 @@
+{
+  "name": "fx-site",
+  "private": true,
+  "scripts": {
+    "build": "mkdir -p dist && echo '<h1>live-checklist fixture</h1>' > dist/index.html"
+  },
+  "devDependencies": {
+    "wrangler": "4.147.0"
+  }
+}
