@@ -73,6 +73,10 @@ inputs:
     description: GitHub environment name for the deployment record.
     required: false
     default: production
+  deactivate-previous:
+    description: After a successful deploy, mark this action's earlier deployments in the environment inactive. GitHub's own auto_inactive skips production, so without this every production deploy stays "active". Deployments recorded by other tools are never touched.
+    required: false
+    default: "true"
   github-token:
     description: Token for the deployment record (needs deployments write).
     required: false
@@ -160,6 +164,7 @@ runs:
         CFP_ENVIRONMENT_URL: ${{ steps.deploy.outputs.url }}
         CFP_PRODUCTION: "true"
         CFP_TRANSIENT: "false"
+        CFP_DEACTIVATE_PREVIOUS: ${{ inputs.deactivate-previous }}
       run: node "$GITHUB_ACTION_PATH/../src/deployment.mjs"
 
     - name: Fail when the deploy failed

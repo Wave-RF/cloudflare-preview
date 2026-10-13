@@ -6,10 +6,12 @@
 //   id given                      → post the status on that deployment (start → finish)
 //   no id, state inactive         → mark every deployment of this PR in the environment
 //                                   inactive (for a closed PR); with CFP_DELETE, delete them too
-// After a `success`, earlier deployments of the same PR in the same environment are
-// marked inactive. GitHub's auto_inactive does not do this for transient environments
-// (docs.github.com/rest/deployments/statuses: it applies to "non-transient,
-// non-production" deployments only), so we do it explicitly.
+// After a `success`, earlier deployments are marked inactive: for a preview, those of the
+// same PR in the same environment; for production (CFP_PRODUCTION), every deployment this
+// action recorded in the environment, whatever its PR. GitHub's auto_inactive does not do
+// this for transient or production environments (docs.github.com/rest/deployments/statuses:
+// it applies to "non-transient, non-production" deployments only), so we do it explicitly.
+// Deployments some other tool created (no payload.source of ours) are never touched.
 //
 // Env: CFP_GITHUB_TOKEN, CFP_ENVIRONMENT (pattern), CFP_LABEL, CFP_STATE,
 //      CFP_DEPLOYMENT_ID, CFP_ENVIRONMENT_URL, CFP_LOG_URL, CFP_DESCRIPTION,
@@ -27,35 +29,45 @@ const STATES = ["queued", "in_progress", "pending", "success", "failure", "error
 const HTTPS = /^https:\/\/\S+$/;
 const PAYLOAD_SOURCE = "cloudflare-preview";
 
-const prOf = (d) => {
+// The payload this action recorded, or null for a deployment some other tool created.
+// Ownership is explicit so that no rule can match a foreign deployment by accident.
+const ourPayload = (d) => {
   let p = d?.payload;
   if (typeof p === "string") {
     try {
       p = JSON.parse(p);
     } catch {
-      return "";
+      return null;
     }
   }
-  return p && p.source === PAYLOAD_SOURCE ? String(p.pr ?? "") : "";
+  return p && typeof p === "object" && p.source === PAYLOAD_SOURCE ? p : null;
 };
+const isOurs = (d) => ourPayload(d) !== null;
+// The PR number we recorded ("" for a push deploy with pr: null). Only meaningful when isOurs(d).
+const prOf = (d) => String(ourPayload(d)?.pr ?? "");
 
 /**
  * Mark this PR's deployments in `environment` inactive (all but `keepId`), and with
  * `remove` also DELETE them. GitHub only lets you delete an inactive deployment when the
  * repo has more than one (docs.github.com/rest/deployments/deployments#delete-a-deployment),
  * so deactivation always comes first.
+ *
+ * With `production`, the PR is ignored: every deployment this action recorded in the
+ * environment (except `keepId`) is retired, because a production deploy has no PR and
+ * GitHub's auto_inactive skips production environments. Foreign deployments are never touched.
  */
-export async function deactivateOthers(client, repo, { environment, pr, keepId, remove = false }) {
+export async function deactivateOthers(client, repo, { environment, pr, keepId, remove = false, production = false }) {
   const list = await client.paginate(`/repos/${repo}/deployments?environment=${encodeURIComponent(environment)}`, { maxPages: 10 });
   let deactivated = 0;
   let deleted = 0;
   for (const d of list) {
-    if (String(d.id) === String(keepId) || prOf(d) !== String(pr)) continue;
+    if (String(d.id) === String(keepId) || !isOurs(d)) continue;
+    if (!production && prOf(d) !== String(pr)) continue;
     const { data: statuses } = await client.request("GET", `/repos/${repo}/deployments/${d.id}/statuses?per_page=1`);
     if (!(Array.isArray(statuses) && statuses[0]?.state === "inactive")) {
       await client.request("POST", `/repos/${repo}/deployments/${d.id}/statuses`, {
         state: "inactive",
-        description: keepId ? "Superseded by a newer commit" : "Pull request closed",
+        description: !keepId ? "Pull request closed" : production ? "Superseded by a newer deploy" : "Superseded by a newer commit",
       });
       deactivated++;
     }
@@ -118,8 +130,9 @@ export async function deployment({ client } = {}) {
   setOutput("deployment-id", id);
 
   let deactivated = 0;
-  if (state === "success" && ctx.pr && boolInput("CFP_DEACTIVATE_PREVIOUS", true))
-    ({ deactivated } = await deactivateOthers(client, repo, { environment, pr: ctx.pr, keepId: id }));
+  if (state === "success" && (production || ctx.pr) && boolInput("CFP_DEACTIVATE_PREVIOUS", true))
+    ({ deactivated } = await deactivateOthers(client, repo, { environment, pr: ctx.pr, keepId: id, production }));
+  setOutput("deactivated", String(deactivated));
   return { id, deactivated };
 }
 
