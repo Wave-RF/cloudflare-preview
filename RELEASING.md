@@ -103,9 +103,9 @@ gh release view v1.x.y
 
 ## A merge that didn't release
 
-GitHub starts no workflow for a push made with the built-in `GITHUB_TOKEN`, and Dependabot's auto-merge (enabled by `dependabot-automerge.yml` with that token) is such a push. So:
+GitHub starts no workflow for a push made with the built-in `GITHUB_TOKEN` (for example a bot that merges PRs with it; this repo has none today, but sibling repos' Dependabot auto-merge does). So:
 
-- an auto-merged Dependabot PR runs no release job (harmless on its own: `deps:`/`ci:` never release), and
+- such a merge runs no release job, and
 - if it lands while the release job for an earlier `fix:`/`feat:` merge is starting, that job logs **"The local branch main is behind the remote one, therefore a new version won't be published"** and exits green — and no later run comes to pick the commit up.
 
 Either way, run the release by hand from `main`:
