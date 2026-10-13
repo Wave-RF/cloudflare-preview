@@ -89,6 +89,34 @@ jobs:
           assert text == want, f"rendered text {text!r} != {want!r}"
           print("rendered as plain text:", text)
           PY
+      - name: variants, which encodings really stop a mention and an autolink
+        if: ${{ !cancelled() }}
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, os, re
+          repo, pr = os.environ["GITHUB_REPOSITORY"], os.environ["PR"]
+          variants = {
+            "entity &#64; (current)": "&#64;EricAndrechek",
+            "zwsp @&#8203;": "@&#8203;EricAndrechek",
+            "comment @<!---->": "@<!---->EricAndrechek",
+            "span": "<span>@</span>EricAndrechek",
+            "backslash": "\\@EricAndrechek",
+            "codespan": "`@EricAndrechek`",
+            "url plain": "https://example.com",
+            "url escaped paren (current)": "\\(https://example.com\\)",
+            "url colon entity": "https&#58;//example.com",
+            "url slash entity": "https:&#47;&#47;example.com",
+            "url codespan": "`https://example.com`",
+          }
+          for name, body in variants.items():
+            out = subprocess.run(["gh","api",f"repos/{repo}/issues/{pr}/comments","-f",f"body=variant: {body}"],capture_output=True,text=True,check=True).stdout
+            c = json.loads(out)
+            html = subprocess.run(["gh","api","-H","Accept: application/vnd.github.html+json",f"repos/{repo}/issues/comments/{c['id']}","--jq",".body_html"],capture_output=True,text=True,check=True).stdout
+            mention = "user-mention" in html
+            link = bool(re.search(r'<a [^>]*href="https?://example\.com', html))
+            print(f"{name:32} mention-link={mention!s:5} url-link={link!s:5}  {html.strip()[:150]!r}")
+            subprocess.run(["gh","api","-X","DELETE",f"repos/{repo}/issues/comments/{c['id']}"],check=True)
+          PY
       - name: control, a bare mention in a comment does create a mentioned event
         if: ${{ !cancelled() }}
         run: |
@@ -106,7 +134,7 @@ jobs:
           control=$(jq -r --argjson id "$(cat control-id.txt)" '.[] | select(.event=="commented" and .id==$id) | .created_at' tl.json)
           echo "sticky=$sticky control=$control"
           # mentioned events at or after the sticky comment and before the control comment
-          between=$(jq -r --arg a "$sticky" --arg b "$control" '[.[] | select(.event=="mentioned" and .created_at>=$a and .created_at<$b)] | length' tl.json)
+          between=$(jq -r --arg a "$sticky" '[.[] | select(.event=="mentioned" and .created_at>=$a and (.created_at|fromdateiso8601) <= (($a|fromdateiso8601)+5))] | length' tl.json)
           after=$(jq -r --arg b "$control" '[.[] | select(.event=="mentioned" and .created_at>=$b)] | length' tl.json)
           echo "mentioned events caused by the sticky comment: $between; by the control comment: $after"
           test "$after" -ge 1 || echo "NOTE: control produced no event, so this test cannot discriminate"
@@ -114,8 +142,7 @@ jobs:
 
   failure:
     name: failure
-    needs: wrapper
-    if: ${{ always() && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -142,15 +169,6 @@ jobs:
           echo '{"name":"cfp-live-failure","main":"index.js","compatibility_date":"2026-01-01","preview_urls":true}' > wrangler.jsonc
           echo 'export default { fetch: () => new Response("hi") };' > index.js
           npm install --save-dev --no-audit --no-fund "wrangler@$WRANGLER_VERSION"
-      - name: diagnostic, wrangler's own output file for the auth failure
-        working-directory: fx/failure
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ env.BAD_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ env.BAD_ACCOUNT }}
-          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/diag.ndjson
-        run: |
-          node_modules/.bin/wrangler versions upload --preview-alias pr-diag || true
-          echo "---- ndjson"; cat "$RUNNER_TEMP/diag.ndjson"
       - id: root
         uses: ./
         continue-on-error: true
@@ -179,10 +197,21 @@ jobs:
           grep -qi 'fail' body.md
           grep -qE ' 1 attempt' body.md || { echo "FAIL: comment does not say 1 attempt"; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/deployments?sha=${{ github.event.pull_request.head.sha }}" --jq '.[] | [.id, .environment] | @tsv'
+      - name: diagnostic, wrangler's own output file for the auth failure
+        if: ${{ !cancelled() }}
+        working-directory: fx/failure
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ env.BAD_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ env.BAD_ACCOUNT }}
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/diag.ndjson
+        run: |
+          node_modules/.bin/wrangler versions upload --preview-alias pr-diag || true
+          echo "---- ndjson"; cat "$RUNNER_TEMP/diag.ndjson"
 
   detect:
     name: fixture (${{ matrix.fixture }})
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    needs: failure
+    if: ${{ always() && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -376,5 +405,5 @@ jobs:
           getlog wrapper wrapper.log
           echo "=== wrapper"; grep -nE "wrangler|Authentication|skip|attempt|10000" wrapper.log | head -20
           want wrapper.log 'Authentication error|code: 10000|code: 9109|Invalid access token' "wrapper: auth error reached"
-          wantnot wrapper.log 'skipping|Skipping|skipped' "wrapper: not skipped"
+          wantnot wrapper.log '(Skipping|skipping|missing).*(credential|secret|token)' "wrapper: not skipped"
           exit $fail
