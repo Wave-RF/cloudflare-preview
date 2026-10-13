@@ -234,6 +234,22 @@ describe("preview body", () => {
     assert.deepEqual(s.history.map((e) => e.versionUrl), ["https://v3-docs.x.workers.dev", "https://v2-docs.x.workers.dev", "https://v1-docs.x.workers.dev"]);
     assert.equal(nextState(s, { outcome: "failure", sha }, 3), s);
   });
+  it("keeps one history entry per commit: a re-run replaces, it doesn't add a row", () => {
+    const up = (s, n, ver, day) =>
+      nextState(s, { outcome: "success", sha: String(n).repeat(40), versionUrl: `https://${ver}-docs.x.workers.dev`, aliasUrl: "https://pr-1-docs.x.workers.dev", at: `2026-10-0${day}T00:00:00Z` });
+    let s = { current: null, aliasUrl: "", history: [] };
+    s = up(s, 1, "a1", 1); // commit 1
+    s = up(s, 1, "a2", 2); // commit 1 re-run: replaces a1, no history row for commit 1
+    assert.equal(s.current.versionUrl, "https://a2-docs.x.workers.dev");
+    assert.deepEqual(s.history, []);
+    s = up(s, 2, "b1", 3); // commit 2: commit 1's newest version (a2) moves to history
+    s = up(s, 2, "b2", 4); // commit 2 re-run
+    assert.equal(s.current.versionUrl, "https://b2-docs.x.workers.dev");
+    assert.deepEqual(s.history.map((e) => e.versionUrl), ["https://a2-docs.x.workers.dev"]);
+    // A state saved before the fix, holding duplicates, is cleaned on the next upload.
+    const dirty = { current: s.current, aliasUrl: s.aliasUrl, history: [s.history[0], { ...s.history[0], versionUrl: "https://a1-docs.x.workers.dev" }] };
+    assert.deepEqual(up(dirty, 3, "c1", 5).history.map((e) => e.versionUrl), ["https://b2-docs.x.workers.dev", "https://a2-docs.x.workers.dev"]);
+  });
   it("links authors and co-authors, de-duplicated, with a distinct committer", () => {
     const line = authorsLine(
       { authorName: "Ada", authorLogin: "ada", committerName: "Bob", committerLogin: "", coAuthors: [{ name: "Ada", login: "" }, { name: "Cy", login: "cy" }, { name: "Claude", login: "" }] },
