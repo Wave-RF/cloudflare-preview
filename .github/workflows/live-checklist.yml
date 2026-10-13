@@ -89,7 +89,8 @@ jobs:
           print("rendered as plain text:", text)
           PY
       - name: control, a bare mention in a comment does create a mentioned event
-        run: gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body='live-checklist control: @EricAndrechek' --jq .html_url
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body='live-checklist control: @EricAndrechek' --jq .html_url
       - name: assert the timeline
         run: |
           sleep 20
