@@ -52,7 +52,7 @@ actionlint .github/workflows/*.yml examples/*.yml
 shellcheck scripts/*.sh
 ```
 
-Requirements: Node ≥ 20, plus `actionlint` and `shellcheck` from your package manager (e.g. `brew install actionlint shellcheck` or `apt-get install shellcheck`, and actionlint from its releases). `pnpm install` is needed once, and only for the pinned release devDependencies (`check:release`); the actions themselves have nothing to install.
+Requirements: Node ≥ 20, plus `actionlint` and `shellcheck` from your package manager (e.g. `brew install actionlint shellcheck` or `apt-get install shellcheck`, and actionlint from its releases). `pnpm install` is needed once, and only for the pinned release devDependencies (`check:release`); the actions themselves have nothing to install. `pnpm-lock.yaml` is committed and CI and the release use `--frozen-lockfile`, so they get exactly the tree that was tested; `pnpm-workspace.yaml` sets a 7-day `minimumReleaseAge` and Dependabot a matching `cooldown`.
 
 ## File Structure
 

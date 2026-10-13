@@ -67,7 +67,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
-      - run: pnpm install --no-frozen-lockfile
+      # Exactly the committed pnpm-lock.yaml, so CI checks the tree that gets released.
+      - run: pnpm install --frozen-lockfile
       - run: pnpm run check:release
 
   # The composite actions as GitHub runs them, with a fake wrangler: proves the
